@@ -1,36 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Connect AI Agent Demo Builder
 
-## Getting Started
+This is a local Next.js web application designed to help configure, preview, and deploy a two-agent Amazon Connect Customer AI demo.
 
-First, run the development server:
+The tool generates the API payloads needed to provision:
+1. **CustomerIntentRouter**: Orchestration agent for capturing intent and routing.
+2. **LostCard**: Specialist self-service agent for lost, stolen, damaged, or retained cards.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Features
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- **Local Persistence**: Configuration is stored in your browser's local storage.
+- **YAML Prompt Editing**: Built-in editor for managing agent prompts.
+- **Validation**: Ensures prompts contain necessary placeholders (`{{$.conversationHistory}}`, `<message>`, etc.) and valid YAML.
+- **Payload Preview**: See the exact JSON payloads that will be pushed to the Amazon Q Connect API.
+- **Safe Deployment**: Dry-run preview and specific deployment steps to manage AWS changes.
+- **Portability**: Import and export your configuration via JSON.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Setup
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-## Learn More
+2. Copy the environment variables example:
+   ```bash
+   cp .env.example .env.local
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+3. Update `.env.local` with your target AWS Region, Assistant ID, and (optionally) Connect Instance ID. **Never commit this file.**
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+4. Start the development server:
+   ```bash
+   npm run dev
+   ```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+5. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-## Deploy on Vercel
+## Security & Privacy
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **No Secrets Stored**: The application relies on the default AWS Credential chain of the environment running the server (e.g. your local AWS profile). It does not store access keys or secret keys in the codebase.
+- **Local Config Only**: Your project configuration is saved locally to the browser's `localStorage` and never sent anywhere except to AWS during deployment.
+- **Synthetic Data Only**: Do not enter real customer PII into the agent prompts or payload configurations.
