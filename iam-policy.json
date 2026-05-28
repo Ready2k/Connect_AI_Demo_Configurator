@@ -48,7 +48,8 @@
                 "connect:ListPhoneNumbers",
                 "connect:ListPhoneNumbersV2",
                 "connect:DescribePhoneNumber",
-                "connect:ListIntegrationAssociations"
+                "connect:ListIntegrationAssociations",
+                "connect:ListBots"
             ],
             "Resource": "arn:aws:connect:{region}:{account-id}:*"
         },
@@ -56,6 +57,7 @@
             "Sid": "ConnectWrite",
             "Effect": "Allow",
             "Action": [
+                "connect:CreateContactFlow",
                 "connect:UpdateContactFlowContent",
                 "connect:UpdateContactFlowMetadata",
                 "connect:AssociateBot"
