@@ -178,15 +178,24 @@ export function DeploymentStepper() {
             ) : (
               <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
             )}
-            <div className="overflow-hidden">
+            <div className="overflow-hidden w-full">
               <h3 className={"font-medium " + (result.success ? "text-green-800" : "text-red-800")}>
-                {result.success ? "Deployment Successful" : "Deployment Failed"}
+                {result.success ? "Deployment Successful" : "Deployment Partially Failed"}
               </h3>
               {result.error && <p className="text-sm text-red-700 mt-1">{result.error}</p>}
+              {result.manifest?.agents.some(a => a.error) && (
+                <div className="mt-3 space-y-2">
+                  {result.manifest.agents.filter(a => a.error).map((a, i) => (
+                    <div key={i} className="p-3 bg-red-100 border border-red-300 rounded text-xs text-red-800">
+                      <strong>{a.baseName} Agent:</strong> {a.error}
+                    </div>
+                  ))}
+                </div>
+              )}
               {result.manifest && (
                 <div className="mt-3">
-                  <p className="text-sm text-green-700 mb-2">Manifest generated:</p>
-                  <pre className="text-xs bg-white bg-opacity-60 p-3 rounded border border-green-200 overflow-auto text-green-900 custom-scrollbar max-h-60">
+                  <p className={"text-sm mb-2 " + (result.success ? "text-green-700" : "text-red-700")}>Manifest generated:</p>
+                  <pre className={"text-xs bg-white bg-opacity-60 p-3 rounded border overflow-auto custom-scrollbar max-h-60 " + (result.success ? "border-green-200 text-green-900" : "border-red-200 text-red-900")}>
                     {JSON.stringify(result.manifest, null, 2)}
                   </pre>
                 </div>

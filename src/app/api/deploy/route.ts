@@ -16,12 +16,7 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    if (config.aws.deploymentMode.includes("agents") && (!config.aws.connectInstanceId || !config.aws.connectRegion)) {
-      return NextResponse.json({ 
-        success: false, 
-        error: "Amazon Connect Instance ID and Region are required to deploy Orchestration Agents. Please set them in the Connect Config section." 
-      }, { status: 400 });
-    }
+
     const result = await deployProject(config as ProjectConfig, timestamp || Date.now());
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: 400 });

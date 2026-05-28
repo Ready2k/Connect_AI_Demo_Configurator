@@ -38,10 +38,33 @@ export function buildPayloads(config: ProjectConfig, timestamp: number = Date.no
       assistantId: aws.assistantId,
       name: deployedName,
       type: agent.agentType,
-      visibilityStatus: aws.visibilityStatus,
+      visibilityStatus: "PUBLISHED",
       configuration: {
         orchestrationAIAgentConfiguration: {
           orchestrationAIPromptId: "",
+          locale: "en_US",
+          toolConfigurations: [
+            {
+              toolName: "Complete",
+              toolType: "RETURN_TO_CONTROL",
+              description: "Use this tool when the customer's request has been fully resolved and the conversation can end.",
+              inputSchema: { type: "object", properties: {} },
+              userInteractionConfiguration: { isUserConfirmationRequired: false },
+            },
+            {
+              toolName: "Escalate",
+              toolType: "RETURN_TO_CONTROL",
+              description: "Use this tool to escalate the conversation to a human agent when the request cannot be resolved autonomously.",
+              inputSchema: { type: "object", properties: {} },
+              userInteractionConfiguration: { isUserConfirmationRequired: false },
+            },
+            {
+              toolName: "Retrieve",
+              toolType: "MODEL_CONTEXT_PROTOCOL",
+              toolId: "aws_service__qconnect_Retrieve",
+              userInteractionConfiguration: { isUserConfirmationRequired: false },
+            },
+          ],
         },
       },
       tags,

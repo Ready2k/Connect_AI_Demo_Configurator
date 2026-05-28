@@ -145,32 +145,41 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
         let agentRes;
         try {
           agentRes = await createAiAgent(client, a);
-        } catch (err: any) {
-          const fullErrorDetails = `Name: ${err.name}, Message: ${err.message}, Fault: ${err.$fault || 'unknown'}, Metadata: ${JSON.stringify(err.$metadata || {})}`;
-          throw new Error(`Failed to create Agent for '${baseName}': ${fullErrorDetails}. Prompt ID used: ${a.configuration?.orchestrationAIAgentConfiguration?.orchestrationAIPromptId}`);
-        }
+          
+          if (!agentRes.aiAgent?.aiAgentId) {
+            throw new Error(`Expected agent identifier in SDK response.`);
+          }
 
-        if (!agentRes.aiAgent?.aiAgentId) {
-          throw new Error(`Failed to create Agent ${baseName}: Expected agent identifier in SDK response.`);
-        }
+          let agentVerRes;
+          try {
+            agentVerRes = await createAiAgentVersion(client, {
+              assistantId: aws.assistantId,
+              aiAgentId: agentRes.aiAgent.aiAgentId,
+            });
+          } catch (err: any) {
+            throw new Error(`Failed to create Agent Version: ${err.message}`);
+          }
 
-        let agentVerRes;
-        try {
-          agentVerRes = await createAiAgentVersion(client, {
-            assistantId: aws.assistantId,
-            aiAgentId: agentRes.aiAgent.aiAgentId,
+          agents.push({
+            id: agentRes.aiAgent.aiAgentId,
+            arn: agentRes.aiAgent.aiAgentArn as string,
+            version: agentVerRes.versionNumber?.toString(),
+            versionArn: agentVerRes.aiAgent?.aiAgentArn || `${agentRes.aiAgent.aiAgentArn}:${agentVerRes.versionNumber}`,
+            baseName,
+            deployedName: agentRes.aiAgent.name as string,
           });
-        } catch (err: any) {
-          throw new Error(`Failed to create Agent Version for '${baseName}': ${err.message}`);
-        }
 
-        agents.push({
-          id: agentRes.aiAgent.aiAgentId,
-          arn: agentRes.aiAgent.aiAgentArn as string,
-          version: agentVerRes.versionNumber?.toString(),
-          baseName,
-          deployedName: agentRes.aiAgent.name as string,
-        });
+        } catch (err: any) {
+          const fullErrorDetails = `Name: ${err.name}, Message: ${err.message}, Fault: ${err.$fault || 'unknown'}`;
+          console.error(`Failed to create Agent for '${baseName}': ${fullErrorDetails}`);
+          agents.push({
+            id: "deployment_failed",
+            arn: "deployment_failed",
+            baseName,
+            deployedName: baseName,
+            error: `Agent creation blocked by AWS IAM: ${err.message}. Please create this Agent manually in the AWS Console.`,
+          });
+        }
       }
     }
 
@@ -182,6 +191,16 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
       prompts,
       agents,
     };
+
+    const failedAgents = agents.filter(a => a.id === "deployment_failed");
+    if (failedAgents.length > 0) {
+      const names = failedAgents.map(a => a.baseName).join(", ");
+      return {
+        success: false,
+        error: `Agent deployment failed for: ${names}. Prompts were created successfully. See manifest for details.`,
+        manifest,
+      };
+    }
 
     return { success: true, manifest };
   } catch (error: any) {

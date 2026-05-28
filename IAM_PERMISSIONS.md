@@ -8,30 +8,37 @@ The full policy is in `iam-policy.json` in this directory.
 
 ## Statements
 
-### `QConnectAI` — Amazon Q in Connect (unchanged)
+### `QConnectAIList` — List assistants (resource `*`)
 
-Covers all agent and prompt operations for the existing agent builder workflow.
+`wisdom:ListAssistants` cannot be scoped to a specific resource — it must remain `"Resource": "*"`.
+
+### `QConnectAI` — Amazon Q in Connect (scoped to `arn:aws:wisdom:{region}:{account-id}:*`)
+
+Covers all agent and prompt operations for the agent builder workflow.
 
 | Action | Used for |
 |---|---|
 | `wisdom:CreateAIPrompt` / `CreateAIPromptVersion` | Deploy prompts |
 | `wisdom:CreateAIAgent` / `CreateAIAgentVersion` | Deploy agents |
-| `wisdom:GetAIPrompt` | Fetch prompt text for import |
+| `wisdom:GetAIPrompt` / `GetAIAgent` | Fetch resource details |
 | `wisdom:DeleteAIPrompt` | Cleanup during redeploy |
-| `wisdom:ListAIPrompts` / `ListAIAgents` | Duplicate detection; Fetch from AWS |
+| `wisdom:ListAIPrompts` / `ListAIAgents` | Duplicate detection; fetch from AWS |
 | `wisdom:ListModels` | Model picker in settings |
-| `wisdom:GetAssistant` / `ListAssistants` | Validate assistant ID |
+| `wisdom:GetAssistant` | Validate assistant ID |
 | `wisdom:TagResource` | Apply project tags on create |
 
 ---
 
-### `ConnectRead` — Connect read operations
+### `ConnectListInstances` — List instances (resource `*`)
+
+`connect:ListInstances` cannot be scoped to a specific instance — it must remain `"Resource": "*"`.
+
+### `ConnectRead` — Connect read operations (scoped to `arn:aws:connect:{region}:{account-id}:*`)
 
 Covers discovery and flow schema extraction.
 
 | Action | Used for | New in |
 |---|---|---|
-| `connect:ListInstances` | Validate instance ID in settings | Existing |
 | `connect:DescribeInstance` | Derive instance alias / URL | Existing |
 | `connect:ListQueues` / `DescribeQueue` | Queue picker in journey configurator | Existing |
 | `connect:ListContactFlows` | Flow Discovery page — list all flows | Existing |
@@ -39,10 +46,11 @@ Covers discovery and flow schema extraction.
 | `connect:ListPhoneNumbers` | Phone number picker in experience builder | **v1 new** |
 | `connect:ListPhoneNumbersV2` | Paginated phone number listing (newer API) | **v1 new** |
 | `connect:DescribePhoneNumber` | Get full DID details | **v1 new** |
+| `connect:ListIntegrationAssociations` | Required for ORCHESTRATION AI Agent deployment — Q Connect calls this internally to verify the Connect–Q Connect integration before creating the agent | **v1 new** |
 
 ---
 
-### `ConnectWrite` — Connect write operations
+### `ConnectWrite` — Connect write operations (scoped to `arn:aws:connect:{region}:{account-id}:*`)
 
 These exist for future use. **Not called in v1** of the Experience Builder (flows are preview + export only).
 
@@ -54,7 +62,7 @@ These exist for future use. **Not called in v1** of the Experience Builder (flow
 
 ---
 
-### `ConnectWebRTC` — Voice testing *(new in v1)*
+### `ConnectWebRTC` — Voice testing *(new in v1)* (scoped to `arn:aws:connect:{region}:{account-id}:*`)
 
 Required for the WebRTC test call feature (simulate an inbound call without a PSTN DID).
 
@@ -106,13 +114,15 @@ These will be needed when flow deployment is added.
 
 ---
 
-## Minimal scope note
+## Resource scoping
 
-All statements currently use `"Resource": "*"`. For production hardening, scope `Resource` to the specific Connect instance ARN and assistant ARN:
+`ListInstances` and `ListAssistants` must use `"Resource": "*"` (AWS does not support resource-level restrictions on list-all operations). All other statements are scoped to `{region}` and `{account-id}`.
 
-```
-arn:aws:connect:us-west-2:{account-id}:instance/{instance-id}/*
-arn:aws:wisdom:{region}:{account-id}:assistant/{assistant-id}
-```
+Replace the placeholders in `iam-policy.json` before applying:
 
-This tool is intended for local demo use — the broad resource scope is acceptable in that context.
+| Placeholder | Example |
+|---|---|
+| `{region}` | `us-west-2` |
+| `{account-id}` | `123456789012` |
+
+Bedrock remains `"Resource": "*"` — foundation model ARNs have no account ID component and cross-region inference profile ARNs vary; scoping further adds complexity without meaningful security benefit for a local demo tool.

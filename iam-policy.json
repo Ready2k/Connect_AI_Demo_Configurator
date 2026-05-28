@@ -2,6 +2,14 @@
     "Version": "2012-10-17",
     "Statement": [
         {
+            "Sid": "QConnectAIList",
+            "Effect": "Allow",
+            "Action": [
+                "wisdom:ListAssistants"
+            ],
+            "Resource": "*"
+        },
+        {
             "Sid": "QConnectAI",
             "Effect": "Allow",
             "Action": [
@@ -10,13 +18,21 @@
                 "wisdom:CreateAIAgent",
                 "wisdom:CreateAIAgentVersion",
                 "wisdom:GetAIPrompt",
+                "wisdom:GetAIAgent",
                 "wisdom:DeleteAIPrompt",
                 "wisdom:ListAIPrompts",
                 "wisdom:ListAIAgents",
                 "wisdom:ListModels",
                 "wisdom:GetAssistant",
-                "wisdom:ListAssistants",
                 "wisdom:TagResource"
+            ],
+            "Resource": "arn:aws:wisdom:{region}:{account-id}:*"
+        },
+        {
+            "Sid": "ConnectListInstances",
+            "Effect": "Allow",
+            "Action": [
+                "connect:ListInstances"
             ],
             "Resource": "*"
         },
@@ -24,7 +40,6 @@
             "Sid": "ConnectRead",
             "Effect": "Allow",
             "Action": [
-                "connect:ListInstances",
                 "connect:DescribeInstance",
                 "connect:ListQueues",
                 "connect:DescribeQueue",
@@ -32,9 +47,10 @@
                 "connect:DescribeContactFlow",
                 "connect:ListPhoneNumbers",
                 "connect:ListPhoneNumbersV2",
-                "connect:DescribePhoneNumber"
+                "connect:DescribePhoneNumber",
+                "connect:ListIntegrationAssociations"
             ],
-            "Resource": "*"
+            "Resource": "arn:aws:connect:{region}:{account-id}:*"
         },
         {
             "Sid": "ConnectWrite",
@@ -44,7 +60,7 @@
                 "connect:UpdateContactFlowMetadata",
                 "connect:AssociateBot"
             ],
-            "Resource": "*"
+            "Resource": "arn:aws:connect:{region}:{account-id}:*"
         },
         {
             "Sid": "ConnectWebRTC",
@@ -52,7 +68,7 @@
             "Action": [
                 "connect:StartWebRTCContact"
             ],
-            "Resource": "*"
+            "Resource": "arn:aws:connect:{region}:{account-id}:*"
         },
         {
             "Sid": "BedrockInference",

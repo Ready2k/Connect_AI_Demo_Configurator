@@ -75,8 +75,10 @@ export interface DeployedAgent {
   id: string;
   arn?: string;
   version?: string;
+  versionArn?: string;
   baseName: string;
   deployedName: string;
+  error?: string;
 }
 
 export interface DeploymentManifest {
