@@ -74,8 +74,19 @@ export default function ExperiencePage() {
 
     fetch(`/api/aws/connect/lex-bots?region=${enc(connectRegion)}&connectInstanceId=${enc(connectInstanceId)}`)
       .then((r) => r.json())
-      .then((data: { bots?: Array<{ aliasArn: string; label: string }> }) => { if (data.bots) setLexBots(data.bots); })
-      .catch(() => {});
+      .then((data: { bots?: Array<{ aliasArn: string; label: string }> }) => {
+        if (data.bots && data.bots.length > 0) {
+          setLexBots(data.bots);
+        } else if (projectConfig.aws.lexBotAliasArn) {
+          // API blocked or no bots — seed from the settings-level ARN
+          setLexBots([{ aliasArn: projectConfig.aws.lexBotAliasArn, label: "Q in Connect (from Settings)" }]);
+        }
+      })
+      .catch(() => {
+        if (projectConfig.aws.lexBotAliasArn) {
+          setLexBots([{ aliasArn: projectConfig.aws.lexBotAliasArn, label: "Q in Connect (from Settings)" }]);
+        }
+      });
 
     if (assistantId) {
       fetch(`/api/aws/qconnect/ai-agents?region=${enc(region || connectRegion)}&assistantId=${enc(assistantId)}`)
@@ -83,7 +94,7 @@ export default function ExperiencePage() {
         .then((data: { agents?: Array<{ name: string; arn: string; type: string }> }) => { if (data.agents) setQAgents(data.agents); })
         .catch(() => {});
     }
-  }, [projectConfig.aws.connectRegion, projectConfig.aws.connectInstanceId, projectConfig.aws.assistantId]);
+  }, [projectConfig.aws.connectRegion, projectConfig.aws.connectInstanceId, projectConfig.aws.assistantId, projectConfig.aws.lexBotAliasArn]);
 
   const activeExperience = getActiveExperience();
   const agents = projectConfig.agents.map((a) => a.name);

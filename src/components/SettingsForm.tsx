@@ -5,9 +5,10 @@ import { Search, Loader2 } from "lucide-react";
 import { addLog } from "@/store/logStore";
 
 const FLOW_ASSISTANT_MODEL_OPTIONS = [
-  { value: "us.anthropic.claude-sonnet-4-6-20250514-v1:0", label: "Sonnet 4.6 (Recommended)" },
-  { value: "us.anthropic.claude-opus-4-7-20250514-v1:0", label: "Opus 4.7 (Best quality)" },
-  { value: "us.anthropic.claude-haiku-4-5-20251001-v1:0", label: "Haiku 4.5 (Economy)" },
+  { value: "us.amazon.nova-pro-v1:0", label: "Nova Pro (Recommended for flow generation)" },
+  { value: "us.anthropic.claude-sonnet-4-6-20250514-v1:0", label: "Claude Sonnet 4.6" },
+  { value: "us.anthropic.claude-opus-4-7-20250514-v1:0", label: "Claude Opus 4.7 (Best quality)" },
+  { value: "us.anthropic.claude-haiku-4-5-20251001-v1:0", label: "Claude Haiku 4.5 (Economy)" },
 ];
 
 export function SettingsForm() {
@@ -20,6 +21,9 @@ export function SettingsForm() {
   const [modelsData, setModelsData] = useState<{ models: any[], warning?: string } | null>(null);
   const [derivingUrl, setDerivingUrl] = useState(false);
   const [customModelId, setCustomModelId] = useState("");
+  const [fetchingLexBots, setFetchingLexBots] = useState(false);
+  const [lexBotOptions, setLexBotOptions] = useState<Array<{ aliasArn: string; label: string }>>([]);
+  const [lexBotError, setLexBotError] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -57,6 +61,34 @@ export function SettingsForm() {
       alert("Discovery failed: " + err.message);
     } finally {
       setDiscovering(false);
+    }
+  };
+
+  const handleFetchLexBots = async () => {
+    const { connectRegion, connectInstanceId } = projectConfig.aws;
+    if (!connectRegion || !connectInstanceId) {
+      setLexBotError("Set Connect Region and Connect Instance ID first.");
+      return;
+    }
+    setFetchingLexBots(true);
+    setLexBotError(null);
+    try {
+      const res = await fetch(
+        `/api/aws/connect/lex-bots?region=${encodeURIComponent(connectRegion)}&connectInstanceId=${encodeURIComponent(connectInstanceId)}`
+      );
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const bots: Array<{ aliasArn: string; label: string }> = data.bots ?? [];
+      setLexBotOptions(bots);
+      if (bots.length === 1 && !projectConfig.aws.lexBotAliasArn) {
+        updateProjectConfig({ aws: { ...projectConfig.aws, lexBotAliasArn: bots[0].aliasArn } });
+      }
+      if (bots.length === 0) setLexBotError("No Lex V2 bots found. Check connect:ListBots permission.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed";
+      setLexBotError(msg.includes("not authorized") ? "IAM permission connect:ListBots not granted — enter ARN manually." : msg);
+    } finally {
+      setFetchingLexBots(false);
     }
   };
 
@@ -290,6 +322,44 @@ export function SettingsForm() {
             />
             <p className="text-xs text-gray-400 mt-1">Used for WebRTC testing. Click Auto-derive to populate from your instance ID.</p>
           </div>
+          <div className="col-span-1 md:col-span-2">
+            <div className="flex justify-between items-center mb-1">
+              <label className="block text-sm font-medium text-gray-700">Q Connect Lex Bot Alias ARN</label>
+              <button
+                onClick={handleFetchLexBots}
+                disabled={fetchingLexBots}
+                className="text-sm flex items-center gap-1 text-blue-600 hover:text-blue-800 disabled:opacity-50 transition-colors"
+              >
+                {fetchingLexBots ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                {fetchingLexBots ? "Fetching..." : "Fetch from Connect"}
+              </button>
+            </div>
+            {lexBotOptions.length > 0 ? (
+              <select
+                className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm mb-2"
+                value={projectConfig.aws.lexBotAliasArn ?? ""}
+                onChange={(e) => updateProjectConfig({ aws: { ...projectConfig.aws, lexBotAliasArn: e.target.value } })}
+              >
+                <option value="">-- Select Lex Bot --</option>
+                {lexBotOptions.map((b) => (
+                  <option key={b.aliasArn} value={b.aliasArn}>{b.label}</option>
+                ))}
+              </select>
+            ) : null}
+            <input
+              type="text"
+              className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+              placeholder="arn:aws:lex:region:account:bot-alias/botId/aliasId"
+              value={projectConfig.aws.lexBotAliasArn ?? ""}
+              onChange={(e) => updateProjectConfig({ aws: { ...projectConfig.aws, lexBotAliasArn: e.target.value } })}
+            />
+            {lexBotError && <p className="text-xs text-amber-600 mt-1">{lexBotError}</p>}
+            <p className="text-xs text-gray-400 mt-1">
+              The Q in Connect Lex bot alias ARN. Set once here — used automatically in all experiences.
+              Find it in Connect console → Amazon Q in Connect → Lex bot, or click Fetch from Connect.
+            </p>
+          </div>
+
           <div className="col-span-1 md:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-1">Flow Assistant Model</label>
             <select

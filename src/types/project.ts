@@ -33,6 +33,7 @@ export interface AwsSettings {
   connectRegion: string;
   connectInstanceUrl: string;
   flowAssistantModelId: string;
+  lexBotAliasArn?: string;
 }
 
 export interface AgentConfig {

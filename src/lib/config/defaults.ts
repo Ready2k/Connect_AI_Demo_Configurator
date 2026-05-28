@@ -17,7 +17,7 @@ export const defaultProjectConfig: ProjectConfig = {
     nameSuffixMode: "environment_and_timestamp",
     connectRegion: process.env.CONNECT_REGION || "us-west-2",
     connectInstanceUrl: process.env.CONNECT_INSTANCE_URL || "",
-    flowAssistantModelId: process.env.FLOW_ASSISTANT_MODEL_ID || "us.anthropic.claude-sonnet-4-6-20250514-v1:0",
+    flowAssistantModelId: process.env.FLOW_ASSISTANT_MODEL_ID || "us.amazon.nova-pro-v1:0",
   },
   agents: [
     {
