@@ -32,6 +32,11 @@ export default function Home() {
     reader.onload = (event) => {
       try {
         const json = JSON.parse(event.target?.result as string);
+        if (!json || typeof json !== "object" || !json.projectName || !json.aws || !Array.isArray(json.agents) || !json.handoff) {
+          addLog("ERROR", "Project", `Imported file is not a valid project configuration`);
+          alert("Invalid project configuration: missing required fields (projectName, aws, agents, handoff).");
+          return;
+        }
         setProjectConfig(json);
         addLog("SUCCESS", "Project", `Successfully imported project configuration`);
         alert("Configuration imported successfully!");

@@ -11,7 +11,7 @@ interface AgentConfigCardProps {
 
 export function AgentConfigCard({ config, onChange, onRemove, isExpanded = true }: AgentConfigCardProps) {
   return (
-    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 space-y-6">
+    <div className={`bg-white p-6 rounded-lg shadow-sm border space-y-6 transition-opacity ${config.enabled ? "border-gray-100" : "border-gray-200 opacity-50"}`}>
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <div className="flex-1 space-y-2">
           <input 
@@ -41,7 +41,19 @@ export function AgentConfigCard({ config, onChange, onRemove, isExpanded = true 
             <option value="MESSAGES">MESSAGES</option>
             <option value="TEXT_COMPLETIONS">TEXT_COMPLETIONS</option>
           </select>
-          <button 
+          <label className="flex items-center gap-1.5 cursor-pointer select-none ml-1" title="Include in next deployment">
+            <span className="text-xs font-medium text-gray-600">Deploy</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={config.enabled}
+              onClick={() => onChange({ ...config, enabled: !config.enabled })}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${config.enabled ? "bg-blue-600" : "bg-gray-300"}`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${config.enabled ? "translate-x-4" : "translate-x-1"}`} />
+            </button>
+          </label>
+          <button
             onClick={onRemove}
             className="ml-2 text-red-600 hover:text-red-800 text-sm font-medium p-1"
             title="Remove Agent"

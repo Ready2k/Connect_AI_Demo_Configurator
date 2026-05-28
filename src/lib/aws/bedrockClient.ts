@@ -19,7 +19,7 @@ export async function converseWithModel(
   systemPrompt: string
 ): Promise<string> {
   const system: SystemContentBlock[] = [{ text: systemPrompt }];
-  const command = new ConverseCommand({ modelId, messages, system });
+  const command = new ConverseCommand({ modelId, messages, system, inferenceConfig: { maxTokens: 8192 } });
   const response = await client.send(command);
   const content = response.output?.message?.content;
   if (!content || content.length === 0) return "";

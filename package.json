@@ -12,9 +12,11 @@
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1055.0",
     "@aws-sdk/client-connect": "^3.1055.0",
+    "@aws-sdk/client-connectparticipant": "^3.1056.0",
     "@aws-sdk/client-qconnect": "^3.1055.0",
     "@aws-sdk/client-sts": "^3.1055.0",
     "@xyflow/react": "^12.10.2",
+    "amazon-chime-sdk-js": "^3.31.0",
     "amazon-connect-streams": "^2.25.1",
     "js-yaml": "^4.1.1",
     "lucide-react": "^1.17.0",
@@ -32,6 +34,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "playwright": "^1.60.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

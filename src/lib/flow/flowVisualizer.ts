@@ -78,7 +78,7 @@ export function flowJsonToGraph(flowJson: string): { nodes: Node[]; edges: Edge[
   const visited = new Set<string>();
   const queue: Array<{ id: string; x: number; y: number }> = [];
 
-  const startId = raw.StartAction ?? (actions[0]?.Identifier ?? "");
+  const startId = (raw.StartAction ?? (raw as Record<string, unknown>).StartFlowModuleId as string | undefined) ?? (actions[0]?.Identifier ?? "");
   if (startId) {
     queue.push({ id: startId, x: 400, y: 0 });
   }
@@ -145,6 +145,8 @@ export function flowJsonToGraph(flowJson: string): { nodes: Node[]; edges: Edge[
         id: `${action.Identifier}->${t.NextAction}`,
         source: action.Identifier,
         target: t.NextAction,
+        sourceHandle: "source",
+        targetHandle: "target",
         label: "next",
       });
     }
@@ -154,6 +156,8 @@ export function flowJsonToGraph(flowJson: string): { nodes: Node[]; edges: Edge[
           id: `${action.Identifier}->err->${err.NextAction}`,
           source: action.Identifier,
           target: err.NextAction,
+          sourceHandle: "source",
+          targetHandle: "target",
           label: err.ErrorType ?? "error",
         });
       }
@@ -164,6 +168,8 @@ export function flowJsonToGraph(flowJson: string): { nodes: Node[]; edges: Edge[
           id: `${action.Identifier}->cond->${cond.NextAction}`,
           source: action.Identifier,
           target: cond.NextAction,
+          sourceHandle: "source",
+          targetHandle: "target",
           label: "condition",
         });
       }

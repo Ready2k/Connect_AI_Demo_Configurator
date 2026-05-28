@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { Layout } from "@/components/Layout";
 
@@ -18,7 +19,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <script src="/connect-streams.js" async />
+        {/* Next.js Script recommended for robust external script loading */}
       </head>
       <body className={inter.className}>
         <Layout>{children}</Layout>

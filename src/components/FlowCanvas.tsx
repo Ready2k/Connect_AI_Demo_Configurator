@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { ReactFlow, MiniMap, Controls, Background, type Node } from "@xyflow/react";
+import { ReactFlow, MiniMap, Controls, Background, Handle, Position, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { flowJsonToGraph } from "@/lib/flow/flowVisualizer";
 
@@ -13,16 +13,20 @@ interface NodeData {
 
 function FlowNode({ data }: { data: NodeData }) {
   return (
-    <div
-      className="px-4 py-2 rounded-lg border-2 text-xs font-medium shadow-sm min-w-28 text-center"
-      style={{
-        background: data.style.background,
-        borderColor: data.style.border,
-        color: data.style.color,
-      }}
-    >
-      {data.label}
-    </div>
+    <>
+      <Handle id="target" type="target" position={Position.Top} />
+      <div
+        className="px-4 py-2 rounded-lg border-2 text-xs font-medium shadow-sm min-w-28 text-center"
+        style={{
+          background: data.style.background,
+          borderColor: data.style.border,
+          color: data.style.color,
+        }}
+      >
+        {data.label}
+      </div>
+      <Handle id="source" type="source" position={Position.Bottom} />
+    </>
   );
 }
 

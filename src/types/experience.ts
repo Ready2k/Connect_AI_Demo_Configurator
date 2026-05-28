@@ -16,6 +16,8 @@ export interface JourneyConfig {
   routingRules: RoutingRule[];
   fallbackQueueId: string;
   fallbackQueueName: string;
+  lexBotAliasArn?: string;
+  wisdomAgentArn?: string;
 }
 
 export type GenerationStatus = "idle" | "generating" | "success" | "manual_review";
@@ -38,8 +40,15 @@ export interface ExperienceConfig {
   verificationResult?: VerificationResult;
 }
 
+export interface GenerationLogEntry {
+  level: "INFO" | "WARN" | "ERROR";
+  message: string;
+  details?: unknown;
+}
+
 export interface GenerationResult {
   status: "success" | "manual_review";
   flowJson?: string;
   error?: string;
+  logs?: GenerationLogEntry[];
 }

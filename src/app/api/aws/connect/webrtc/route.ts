@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       contactId: res.ContactId,
+      participantToken: res.ParticipantToken,
       connectionData: res.ConnectionData,
     });
   } catch (error: unknown) {

@@ -11,6 +11,13 @@ import {
 } from "./qconnectClient";
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 
+export interface DeployProgressEvent {
+  type: "step_start" | "step_complete" | "step_error";
+  stepId: string;
+  error?: string;
+}
+export type DeployProgressCallback = (event: DeployProgressEvent) => void;
+
 async function fetchAllPrompts(client: any, assistantId: string) {
   let nextToken: string | undefined;
   let allPrompts: any[] = [];
@@ -39,7 +46,11 @@ export interface DeployResult {
   manifest?: DeploymentManifest;
 }
 
-export async function deployProject(config: ProjectConfig, timestamp: number): Promise<DeployResult> {
+export async function deployProject(
+  config: ProjectConfig,
+  timestamp: number,
+  onProgress?: DeployProgressCallback
+): Promise<DeployResult> {
   try {
     const { aws } = config;
     if (aws.deploymentMode === "preview_only") {
@@ -69,7 +80,7 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
         }
       }
     }
-    
+
     if (aws.deploymentMode.includes("agents")) {
       const existingAgents = await fetchAllAgents(client, aws.assistantId);
       const targetNames = payloads.agentPayloads.map(a => a.name);
@@ -80,7 +91,7 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
       }
     }
 
-    // 1. Create Prompts (if allowed by mode)
+    // 1. Create Prompts
     if (
       aws.deploymentMode === "create_prompts_only" ||
       aws.deploymentMode === "create_prompts_and_agents"
@@ -90,14 +101,18 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
         const baseAgentConfig = config.agents.filter(a => a.enabled)[i];
         const baseName = baseAgentConfig.name;
 
+        onProgress?.({ type: "step_start", stepId: `prompt_${i}` });
+
         let promptRes;
         try {
           promptRes = await createAiPrompt(client, p);
         } catch (err: any) {
+          onProgress?.({ type: "step_error", stepId: `prompt_${i}`, error: err.message });
           throw new Error(`Failed to create Prompt for '${baseName}': ${err.message}. Payload: ${JSON.stringify(p.templateConfiguration)}`);
         }
 
         if (!promptRes.aiPrompt?.aiPromptId) {
+          onProgress?.({ type: "step_error", stepId: `prompt_${i}` });
           throw new Error(`Failed to create Prompt ${baseName}: Expected prompt identifier in SDK response.`);
         }
 
@@ -108,6 +123,7 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
             aiPromptId: promptRes.aiPrompt.aiPromptId,
           });
         } catch (err: any) {
+          onProgress?.({ type: "step_error", stepId: `prompt_${i}`, error: err.message });
           throw new Error(`Failed to create Prompt Version for '${baseName}': ${err.message}`);
         }
 
@@ -119,10 +135,12 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
           baseName,
           deployedName: promptRes.aiPrompt.name as string,
         });
+
+        onProgress?.({ type: "step_complete", stepId: `prompt_${i}` });
       }
     }
 
-    // 2. Create Agents (if allowed by mode)
+    // 2. Create Agents
     if (
       aws.deploymentMode === "create_agents_only" ||
       aws.deploymentMode === "create_prompts_and_agents"
@@ -132,20 +150,21 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
         const baseAgentConfig = config.agents.filter(agent => agent.enabled)[i];
         const baseName = baseAgentConfig.name;
 
+        onProgress?.({ type: "step_start", stepId: `agent_${i}` });
+
         if (a.configuration?.orchestrationAIAgentConfiguration) {
           const targetPrompt = prompts.find(p => p.baseName === baseName);
-          a.configuration.orchestrationAIAgentConfiguration.orchestrationAIPromptId = 
+          a.configuration.orchestrationAIAgentConfiguration.orchestrationAIPromptId =
             targetPrompt?.version ? `${targetPrompt.id}:${targetPrompt.version}` : (targetPrompt?.id || "");
           if (aws.connectRegion && aws.connectInstanceId) {
-            a.configuration.orchestrationAIAgentConfiguration.connectInstanceArn = 
+            a.configuration.orchestrationAIAgentConfiguration.connectInstanceArn =
               `arn:aws:connect:${aws.connectRegion}:${accountId}:instance/${aws.connectInstanceId}`;
           }
         }
-        
-        let agentRes;
+
         try {
-          agentRes = await createAiAgent(client, a);
-          
+          const agentRes = await createAiAgent(client, a);
+
           if (!agentRes.aiAgent?.aiAgentId) {
             throw new Error(`Expected agent identifier in SDK response.`);
           }
@@ -169,9 +188,12 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
             deployedName: agentRes.aiAgent.name as string,
           });
 
+          onProgress?.({ type: "step_complete", stepId: `agent_${i}` });
+
         } catch (err: any) {
           const fullErrorDetails = `Name: ${err.name}, Message: ${err.message}, Fault: ${err.$fault || 'unknown'}`;
           console.error(`Failed to create Agent for '${baseName}': ${fullErrorDetails}`);
+          onProgress?.({ type: "step_error", stepId: `agent_${i}`, error: err.message });
           agents.push({
             id: "deployment_failed",
             arn: "deployment_failed",
@@ -182,6 +204,8 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
         }
       }
     }
+
+    onProgress?.({ type: "step_start", stepId: "manifest" });
 
     const manifest: DeploymentManifest = {
       deployedAt: new Date().toISOString(),
@@ -195,6 +219,7 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
     const failedAgents = agents.filter(a => a.id === "deployment_failed");
     if (failedAgents.length > 0) {
       const names = failedAgents.map(a => a.baseName).join(", ");
+      onProgress?.({ type: "step_error", stepId: "manifest" });
       return {
         success: false,
         error: `Agent deployment failed for: ${names}. Prompts were created successfully. See manifest for details.`,
@@ -202,6 +227,7 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
       };
     }
 
+    onProgress?.({ type: "step_complete", stepId: "manifest" });
     return { success: true, manifest };
   } catch (error: any) {
     return { success: false, error: error.message || "Unknown error occurred during deployment" };

@@ -2,37 +2,132 @@
 import { useState } from "react";
 import { useProjectStore } from "@/store/projectStore";
 import { DeployResult } from "@/lib/aws/deployService";
-import { CheckCircle2, Circle, AlertCircle, Loader2 } from "lucide-react";
+import { CheckCircle2, Circle, AlertCircle, Loader2, XCircle } from "lucide-react";
 import { computeDeployedName } from "@/lib/config/nameUtils";
 import { addLog } from "@/store/logStore";
+import { AgentConfig } from "@/types/project";
+
+type StepStatus = "pending" | "in_progress" | "complete" | "skipped" | "error";
+
+interface Step {
+  id: string;
+  name: string;
+  status: StepStatus;
+}
+
+function buildSteps(enabledAgents: AgentConfig[], deploymentMode: string): Step[] {
+  return [
+    { id: "validate", name: "Validate Configuration", status: "complete" },
+    { id: "credentials", name: "Check Credentials", status: "complete" },
+    ...enabledAgents.map((agent, i) => ({
+      id: `prompt_${i}`,
+      name: `Create ${agent.name} Prompt`,
+      status: (deploymentMode.includes("prompts") ? "pending" : "skipped") as StepStatus,
+    })),
+    ...enabledAgents.map((agent, i) => ({
+      id: `agent_${i}`,
+      name: `Create ${agent.name} Agent`,
+      status: (deploymentMode.includes("agents") ? "pending" : "skipped") as StepStatus,
+    })),
+    { id: "manifest", name: "Save Manifest", status: "pending" as StepStatus },
+  ];
+}
 
 export function DeploymentStepper() {
   const { projectConfig } = useProjectStore();
   const [deploying, setDeploying] = useState(false);
   const [result, setResult] = useState<DeployResult | null>(null);
-  
   const [smokeTesting, setSmokeTesting] = useState(false);
   const [smokeTestResult, setSmokeTestResult] = useState<any>(null);
+
+  const enabledAgents = projectConfig.agents.filter(a => a.enabled);
+
+  const [deploySteps, setDeploySteps] = useState<Step[]>(() =>
+    buildSteps(enabledAgents, projectConfig.aws.deploymentMode)
+  );
+
+  const updateStep = (stepId: string, status: StepStatus) => {
+    setDeploySteps(prev => prev.map(s => s.id === stepId ? { ...s, status } : s));
+  };
 
   const handleDeploy = async () => {
     setDeploying(true);
     setResult(null);
     const deploymentTimestamp = Date.now();
+
+    // Reset steps to fresh initial state for this run
+    setDeploySteps(buildSteps(enabledAgents, projectConfig.aws.deploymentMode));
+
     try {
       const res = await fetch("/api/deploy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ config: projectConfig, timestamp: deploymentTimestamp })
       });
-      const data = await res.json();
-      setResult(data);
-      if (data.success) {
-        addLog("SUCCESS", "Deploy", `Successfully deployed ${projectConfig.projectName}`, data.manifest);
-      } else {
+
+      // Pre-flight validation failures return JSON, not SSE
+      if (!res.ok) {
+        const data = await res.json();
+        setResult({ success: false, error: data.error });
         addLog("ERROR", "Deploy", `Deployment failed: ${data.error}`);
+        return;
+      }
+
+      // Read SSE stream
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          if (!part.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(part.slice(6));
+
+            if (event.type === "step_start") {
+              updateStep(event.stepId, "in_progress");
+            } else if (event.type === "step_complete") {
+              updateStep(event.stepId, "complete");
+            } else if (event.type === "step_error") {
+              updateStep(event.stepId, "error");
+            } else if (event.type === "done") {
+              const deployResult: DeployResult = {
+                success: event.success,
+                error: event.error,
+                manifest: event.manifest,
+              };
+              setResult(deployResult);
+              if (event.success) {
+                setDeploySteps(prev =>
+                  prev.map(s => s.status === "pending" || s.status === "in_progress"
+                    ? { ...s, status: "complete" }
+                    : s
+                  )
+                );
+                addLog("SUCCESS", "Deploy", `Successfully deployed ${projectConfig.projectName}`, event.manifest);
+              } else {
+                // Mark any step still in_progress as error
+                setDeploySteps(prev =>
+                  prev.map(s => s.status === "in_progress" ? { ...s, status: "error" } : s)
+                );
+                addLog("ERROR", "Deploy", `Deployment failed: ${event.error}`);
+              }
+            }
+          } catch {
+            // Ignore malformed SSE events
+          }
+        }
       }
     } catch (e: any) {
       setResult({ success: false, error: e.message || "An error occurred during deployment" });
+      setDeploySteps(prev => prev.map(s => s.status === "in_progress" ? { ...s, status: "error" } : s));
       addLog("ERROR", "Deploy", `Deployment error: ${e.message}`);
     } finally {
       setDeploying(false);
@@ -63,18 +158,6 @@ export function DeploymentStepper() {
     }
   };
 
-  const steps = [
-    { name: "Validate Configuration", status: "complete" },
-    { name: "Check Credentials", status: "complete" },
-    ...projectConfig.agents.flatMap(agent => [
-      { name: `Create/Update ${agent.name} Prompt`, status: projectConfig.aws.deploymentMode.includes("prompts") ? "pending" : "skipped" },
-    ]),
-    ...projectConfig.agents.flatMap(agent => [
-      { name: `Create/Update ${agent.name} Agent`, status: projectConfig.aws.deploymentMode.includes("agents") ? "pending" : "skipped" },
-    ]),
-    { name: "Save Manifest", status: "pending" },
-  ];
-
   return (
     <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 space-y-6">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center border-b border-gray-100 pb-4 gap-4">
@@ -95,7 +178,8 @@ export function DeploymentStepper() {
           </button>
           <button
             onClick={handleDeploy}
-            disabled={deploying || smokeTesting}
+            disabled={deploying || smokeTesting || enabledAgents.length === 0}
+            title={enabledAgents.length === 0 ? "Enable at least one agent on the Agents page" : undefined}
             className="bg-blue-600 text-white px-6 py-2.5 rounded-md font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors w-full sm:w-auto"
           >
             {deploying && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -141,29 +225,45 @@ export function DeploymentStepper() {
 
       <div className="bg-gray-50 p-4 rounded-md border border-gray-200">
         <h3 className="text-sm font-semibold text-gray-700 mb-2">Target Deployment Names</h3>
-        <ul className="text-sm text-gray-600 space-y-1">
-          {projectConfig.agents.map((agent, i) => (
-            <li key={i}>
-              <strong>{agent.name} Prompt/Agent:</strong> {computeDeployedName(agent.name, projectConfig, Date.now()).replace(/_\d+$/, '_<timestamp>')}
-            </li>
-          ))}
-        </ul>
+        {enabledAgents.length === 0 ? (
+          <p className="text-sm text-amber-600">No agents selected for deployment. Enable at least one agent on the Agents page.</p>
+        ) : (
+          <ul className="text-sm text-gray-600 space-y-1">
+            {enabledAgents.map((agent, i) => (
+              <li key={i}>
+                <strong>{agent.name} Prompt/Agent:</strong> {computeDeployedName(agent.name, projectConfig, Date.now()).replace(/_\d+$/, '_<timestamp>')}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="space-y-4">
         <h3 className="text-sm font-medium text-gray-700 uppercase tracking-wider">Deployment Steps</h3>
         <ul className="space-y-3">
-          {steps.map((step, idx) => (
-            <li key={idx} className="flex items-center gap-3">
+          {deploySteps.map((step) => (
+            <li key={step.id} className="flex items-center gap-3">
               {step.status === "complete" ? (
-                <CheckCircle2 className="w-5 h-5 text-green-500" />
+                <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+              ) : step.status === "in_progress" ? (
+                <Loader2 className="w-5 h-5 text-blue-500 animate-spin shrink-0" />
+              ) : step.status === "error" ? (
+                <XCircle className="w-5 h-5 text-red-500 shrink-0" />
               ) : step.status === "skipped" ? (
-                <Circle className="w-5 h-5 text-gray-300" />
+                <Circle className="w-5 h-5 text-gray-300 shrink-0" />
               ) : (
-                <Circle className="w-5 h-5 text-blue-500" />
+                <Circle className="w-5 h-5 text-blue-300 shrink-0" />
               )}
-              <span className={"text-sm " + (step.status === "skipped" ? "text-gray-400" : "text-gray-700")}>
-                {step.name} {step.status === "skipped" && "(Skipped)"}
+              <span className={
+                step.status === "skipped" ? "text-sm text-gray-400" :
+                step.status === "error" ? "text-sm text-red-600" :
+                step.status === "in_progress" ? "text-sm text-blue-700 font-medium" :
+                step.status === "complete" ? "text-sm text-gray-700" :
+                "text-sm text-gray-500"
+              }>
+                {step.name}
+                {step.status === "skipped" && " (Skipped)"}
+                {step.status === "in_progress" && "…"}
               </span>
             </li>
           ))}
@@ -180,7 +280,7 @@ export function DeploymentStepper() {
             )}
             <div className="overflow-hidden w-full">
               <h3 className={"font-medium " + (result.success ? "text-green-800" : "text-red-800")}>
-                {result.success ? "Deployment Successful" : "Deployment Partially Failed"}
+                {result.success ? "Deployment Successful" : "Deployment Failed"}
               </h3>
               {result.error && <p className="text-sm text-red-700 mt-1">{result.error}</p>}
               {result.manifest?.agents.some(a => a.error) && (
@@ -190,6 +290,14 @@ export function DeploymentStepper() {
                       <strong>{a.baseName} Agent:</strong> {a.error}
                     </div>
                   ))}
+                  <div className="p-3 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800 space-y-1">
+                    <p className="font-semibold">Recovery steps:</p>
+                    <ol className="list-decimal list-inside space-y-0.5">
+                      <li>Go to the AWS Console → Amazon Q in Connect → your assistant → AI Prompts and delete the prompts created in this run (named with this deployment&apos;s timestamp).</li>
+                      <li>Fix the IAM permissions blocking agent creation, or create the agent manually in the Console using the prompt ARN shown in the manifest.</li>
+                      <li>Switch the Deployment Mode to <strong>create_agents_only</strong> in Settings and re-deploy once the prompts are already present.</li>
+                    </ol>
+                  </div>
                 </div>
               )}
               {result.manifest && (

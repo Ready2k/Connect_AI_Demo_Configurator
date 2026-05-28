@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useProjectStore } from "@/store/projectStore";
 import { useExperienceStore } from "@/store/experienceStore";
 import { useSchemaStore } from "@/store/schemaStore";
+import { useLogStore } from "@/store/logStore";
 import { JourneyConfigurator } from "@/components/JourneyConfigurator";
 import { FlowCanvas } from "@/components/FlowCanvas";
 import { WebRTCTester } from "@/components/WebRTCTester";
@@ -12,6 +13,7 @@ import type { ExperienceConfig, JourneyConfig } from "@/types/experience";
 
 interface Queue {
   id: string;
+  arn: string;
   name: string;
 }
 
@@ -36,35 +38,52 @@ export default function ExperiencePage() {
   const { experiences, activeExperienceId, addExperience, updateExperience, setActiveExperience, getActiveExperience } =
     useExperienceStore();
   const { library } = useSchemaStore();
+  const addLog = useLogStore((s) => s.addLog);
 
   const [queues, setQueues] = useState<Queue[]>([]);
   const [flows, setFlows] = useState<Array<{ id: string; name: string }>>([]);
+  const [qAgents, setQAgents] = useState<Array<{ name: string; arn: string; type: string }>>([]);
+  const [lexBots, setLexBots] = useState<Array<{ aliasArn: string; label: string }>>([]);
   const [generating, setGenerating] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [showRawJson, setShowRawJson] = useState(false);
   const [voiceTestOpen, setVoiceTestOpen] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [publishResult, setPublishResult] = useState<{ flowId: string; flowArn?: string; updated: boolean } | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishSentContent, setPublishSentContent] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
-    const { connectRegion, connectInstanceId } = projectConfig.aws;
+    const { connectRegion, connectInstanceId, region, assistantId } = projectConfig.aws;
     if (!connectRegion || !connectInstanceId) return;
-    fetch(
-      `/api/aws/connect/queues?region=${encodeURIComponent(connectRegion)}&connectInstanceId=${encodeURIComponent(connectInstanceId)}`
-    )
+
+    const enc = encodeURIComponent;
+
+    fetch(`/api/aws/connect/queues?region=${enc(connectRegion)}&connectInstanceId=${enc(connectInstanceId)}`)
       .then((r) => r.json())
-      .then((data: { queues?: Queue[] }) => {
-        if (data.queues) setQueues(data.queues);
-      })
+      .then((data: { queues?: Queue[] }) => { if (data.queues) setQueues(data.queues); })
       .catch(() => {});
-    fetch(
-      `/api/aws/connect/flows?region=${encodeURIComponent(connectRegion)}&connectInstanceId=${encodeURIComponent(connectInstanceId)}`
-    )
+
+    fetch(`/api/aws/connect/flows?region=${enc(connectRegion)}&connectInstanceId=${enc(connectInstanceId)}`)
       .then((r) => r.json())
-      .then((data: { flows?: Array<{ id: string; name: string }> }) => {
-        if (data.flows) setFlows(data.flows);
-      })
+      .then((data: { flows?: Array<{ id: string; name: string }> }) => { if (data.flows) setFlows(data.flows); })
       .catch(() => {});
-  }, [projectConfig.aws.connectRegion, projectConfig.aws.connectInstanceId]);
+
+    fetch(`/api/aws/connect/lex-bots?region=${enc(connectRegion)}&connectInstanceId=${enc(connectInstanceId)}`)
+      .then((r) => r.json())
+      .then((data: { bots?: Array<{ aliasArn: string; label: string }> }) => { if (data.bots) setLexBots(data.bots); })
+      .catch(() => {});
+
+    if (assistantId) {
+      fetch(`/api/aws/qconnect/ai-agents?region=${enc(region || connectRegion)}&assistantId=${enc(assistantId)}`)
+        .then((r) => r.json())
+        .then((data: { agents?: Array<{ name: string; arn: string; type: string }> }) => { if (data.agents) setQAgents(data.agents); })
+        .catch(() => {});
+    }
+  }, [projectConfig.aws.connectRegion, projectConfig.aws.connectInstanceId, projectConfig.aws.assistantId]);
 
   const activeExperience = getActiveExperience();
   const agents = projectConfig.agents.map((a) => a.name);
@@ -89,6 +108,12 @@ export default function ExperiencePage() {
     if (!activeExperience || !activeExperienceId) return;
     setGenerating(true);
     updateExperience(activeExperienceId, { generationStatus: "generating" });
+    addLog("INFO", "ExperiencePage", "Starting flow generation", {
+      experience: activeExperience.name,
+      model: projectConfig.aws.flowAssistantModelId,
+      region: projectConfig.aws.connectRegion,
+      entryAgent: activeExperience.journeyConfig.entryAgentName,
+    });
     try {
       const res = await fetch("/api/experience/generate", {
         method: "POST",
@@ -101,15 +126,31 @@ export default function ExperiencePage() {
         }),
       });
       const data = await res.json();
+
+      // Forward server-side logs to the log sidebar
+      if (Array.isArray(data.logs)) {
+        for (const entry of data.logs) {
+          addLog(entry.level, "FlowGenerator", entry.message, entry.details);
+        }
+      }
+
       if (data.error) throw new Error(data.error);
+
       updateExperience(activeExperienceId, {
         generationStatus: data.status,
         generatedFlowJson: data.flowJson,
         generationError: data.error,
         lastGeneratedAt: new Date().toISOString(),
       });
+
+      if (data.status === "success") {
+        addLog("SUCCESS", "ExperiencePage", "Flow generated successfully", { jsonLength: data.flowJson?.length });
+      } else {
+        addLog("WARN", "ExperiencePage", "Flow generation needs manual review", { error: data.error });
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Generation failed";
+      addLog("ERROR", "ExperiencePage", "Flow generation failed", { error: msg });
       updateExperience(activeExperienceId, {
         generationStatus: "manual_review",
         generationError: msg,
@@ -122,6 +163,10 @@ export default function ExperiencePage() {
   const handleVerify = async () => {
     if (!activeExperience?.generatedFlowJson || !activeExperienceId) return;
     setVerifying(true);
+    addLog("INFO", "ExperiencePage", "Starting flow verification", {
+      experience: activeExperience.name,
+      model: projectConfig.aws.flowAssistantModelId,
+    });
     try {
       const res = await fetch("/api/experience/verify", {
         method: "POST",
@@ -136,11 +181,53 @@ export default function ExperiencePage() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       updateExperience(activeExperienceId, { verificationResult: data });
+      addLog("SUCCESS", "ExperiencePage", "Flow verification complete", {
+        issueCount: data.issues?.length ?? 0,
+        suggestionCount: data.suggestions?.length ?? 0,
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Verification failed";
+      addLog("ERROR", "ExperiencePage", "Flow verification failed", { error: msg });
       alert(msg);
     } finally {
       setVerifying(false);
+    }
+  };
+
+  const handlePublish = async () => {
+    if (!activeExperience?.generatedFlowJson || !activeExperienceId) return;
+    setPublishing(true);
+    setPublishError(null);
+    setPublishResult(null);
+    setPublishSentContent(null);
+    try {
+      const { connectRegion, connectInstanceId } = projectConfig.aws;
+      const res = await fetch("/api/aws/connect/flows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          region: connectRegion,
+          connectInstanceId,
+          name: activeExperience.name,
+          flowJson: activeExperience.generatedFlowJson,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        if (data.sentContent) setPublishSentContent(JSON.stringify(data.sentContent, null, 2));
+        throw new Error(data.error);
+      }
+      setPublishResult(data);
+      // Refresh the flows list so the newly published flow appears in the WebRTC tester
+      const flowsRes = await fetch(
+        `/api/aws/connect/flows?region=${encodeURIComponent(connectRegion || "")}&connectInstanceId=${encodeURIComponent(connectInstanceId || "")}`
+      );
+      const flowsData = await flowsRes.json();
+      if (flowsData.flows) setFlows(flowsData.flows);
+    } catch (err: unknown) {
+      setPublishError(err instanceof Error ? err.message : "Publish failed");
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -165,16 +252,18 @@ export default function ExperiencePage() {
       <div className="flex items-center gap-4">
         <h1 className="text-2xl font-bold text-gray-900">Experience Builder</h1>
         <div className="flex-1" />
-        <select
-          className="rounded-md border-gray-300 shadow-sm p-2 border focus:border-purple-500 text-sm"
-          value={activeExperienceId ?? ""}
-          onChange={(e) => setActiveExperience(e.target.value || null)}
-        >
-          <option value="">-- Select Experience --</option>
-          {experiences.map((e) => (
-            <option key={e.id} value={e.id}>{e.name}</option>
-          ))}
-        </select>
+        {mounted && (
+          <select
+            className="rounded-md border-gray-300 shadow-sm p-2 border focus:border-purple-500 text-sm"
+            value={activeExperienceId ?? ""}
+            onChange={(e) => setActiveExperience(e.target.value || null)}
+          >
+            <option value="">-- Select Experience --</option>
+            {experiences.map((e) => (
+              <option key={e.id} value={e.id}>{e.name}</option>
+            ))}
+          </select>
+        )}
         <button
           onClick={handleNewExperience}
           className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors text-sm font-medium"
@@ -183,9 +272,9 @@ export default function ExperiencePage() {
         </button>
       </div>
 
-      {!activeExperience ? (
+      {!mounted || !activeExperience ? (
         <div className="bg-white border border-gray-200 rounded-lg p-12 text-center text-gray-400">
-          <p className="text-sm">Create a new experience to get started.</p>
+          <p className="text-sm">{mounted ? "Create a new experience to get started." : ""}</p>
         </div>
       ) : (
         <div className="flex gap-6">
@@ -208,6 +297,8 @@ export default function ExperiencePage() {
                 onChange={handleJourneyChange}
                 agents={agents}
                 queues={queues}
+                qAgents={qAgents}
+                lexBots={lexBots}
               />
             </div>
 
@@ -307,19 +398,58 @@ export default function ExperiencePage() {
             <FlowCanvas flowJson={activeExperience.generatedFlowJson} />
 
             {activeExperience.generatedFlowJson && (
-              <div className="flex gap-3">
-                <button
-                  onClick={handleExportJson}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors text-sm font-medium"
-                >
-                  Export Flow JSON
-                </button>
-                <button
-                  onClick={handleCopyJson}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors text-sm font-medium"
-                >
-                  Copy JSON
-                </button>
+              <div className="space-y-2">
+                <div className="flex gap-3 flex-wrap">
+                  <button
+                    onClick={handleExportJson}
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors text-sm font-medium"
+                  >
+                    Export Flow JSON
+                  </button>
+                  <button
+                    onClick={handleCopyJson}
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors text-sm font-medium"
+                  >
+                    Copy JSON
+                  </button>
+                  <button
+                    onClick={handlePublish}
+                    disabled={publishing}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 transition-colors text-sm font-medium"
+                  >
+                    {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    {publishing ? "Publishing..." : "Publish to Connect"}
+                  </button>
+                </div>
+                {publishResult && (
+                  <div className="bg-green-50 border border-green-200 rounded-md p-3 text-xs space-y-1">
+                    <p className="text-green-700 font-medium">
+                      {publishResult.updated ? "Flow updated in Amazon Connect" : "Flow created in Amazon Connect"}
+                    </p>
+                    <p className="text-green-600 font-mono">Flow ID: {publishResult.flowId}</p>
+                    {publishResult.flowArn && (
+                      <p className="text-green-600 font-mono break-all">ARN: {publishResult.flowArn}</p>
+                    )}
+                    <p className="text-green-500 mt-1">
+                      Open Voice Test below, select &quot;{activeExperience.name}&quot;, and start a call to test via WebRTC.
+                    </p>
+                  </div>
+                )}
+                {publishError && (
+                  <div className="bg-red-50 border border-red-200 rounded-md p-3 text-xs text-red-700 space-y-2">
+                    <p className="font-medium">{publishError}</p>
+                    {publishSentContent && (
+                      <details>
+                        <summary className="cursor-pointer text-red-600 hover:text-red-800">
+                          Show content sent to Connect (for debugging)
+                        </summary>
+                        <pre className="mt-2 text-gray-700 bg-white rounded p-2 overflow-auto max-h-64 border text-xs font-mono">
+                          {publishSentContent}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

@@ -1,26 +1,49 @@
 "use client";
 
+import { useEffect } from "react";
 import { RoutingRuleRow } from "@/components/RoutingRuleRow";
 import type { JourneyConfig, RoutingRule } from "@/types/experience";
+
+interface QAgent { name: string; arn: string; type: string }
+interface LexBot { aliasArn: string; label: string }
 
 interface JourneyConfiguratorProps {
   config: JourneyConfig;
   onChange: (c: JourneyConfig) => void;
   agents: string[];
-  queues: Array<{ id: string; name: string }>;
+  queues: Array<{ id: string; arn: string; name: string }>;
+  qAgents: QAgent[];
+  lexBots: LexBot[];
 }
 
 function generateRuleId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-export function JourneyConfigurator({ config, onChange, agents, queues }: JourneyConfiguratorProps) {
+export function JourneyConfigurator({ config, onChange, agents, queues, qAgents, lexBots }: JourneyConfiguratorProps) {
+  // Auto-select wisdomAgentArn when entryAgentName matches a discovered Q Connect agent name
+  useEffect(() => {
+    if (!config.entryAgentName || config.wisdomAgentArn) return;
+    const match = qAgents.find(
+      (a) => a.name.toLowerCase() === config.entryAgentName.toLowerCase()
+    );
+    if (match) onChange({ ...config, wisdomAgentArn: match.arn });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.entryAgentName, qAgents]);
+
+  // Auto-select lexBotAliasArn when there's exactly one Lex bot
+  useEffect(() => {
+    if (config.lexBotAliasArn || lexBots.length !== 1) return;
+    onChange({ ...config, lexBotAliasArn: lexBots[0].aliasArn });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lexBots]);
+
   const addRule = () => {
     const newRule: RoutingRule = {
       id: generateRuleId(),
-      attributeKey: "agentOutput.intent",
+      attributeKey: "Tool",
       condition: "",
-      action: "agent",
+      action: "queue",
     };
     onChange({ ...config, routingRules: [...config.routingRules, newRule] });
   };
@@ -64,6 +87,69 @@ export function JourneyConfigurator({ config, onChange, agents, queues }: Journe
       </div>
 
       <div>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-sm font-medium text-gray-700">
+            Q Connect AI Agent
+          </label>
+          {config.wisdomAgentArn && qAgents.length > 0 && (
+            <span className="text-xs text-green-600">auto-selected</span>
+          )}
+        </div>
+        {qAgents.length > 0 ? (
+          <select
+            className={inputClass}
+            value={config.wisdomAgentArn ?? ""}
+            onChange={(e) => onChange({ ...config, wisdomAgentArn: e.target.value })}
+          >
+            <option value="">-- Select Q Connect Agent --</option>
+            {qAgents.map((a) => (
+              <option key={a.arn} value={a.arn}>{a.name} ({a.type})</option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="text"
+            className={inputClass}
+            placeholder="arn:aws:wisdom:region:account:assistant/…/ai-agent/…"
+            value={config.wisdomAgentArn ?? ""}
+            onChange={(e) => onChange({ ...config, wisdomAgentArn: e.target.value })}
+          />
+        )}
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-sm font-medium text-gray-700">
+            Lex Bot
+            <span className="ml-1 text-xs text-gray-400 font-normal">(ConnectParticipantWithLexBot)</span>
+          </label>
+          {config.lexBotAliasArn && lexBots.length === 1 && (
+            <span className="text-xs text-green-600">auto-selected</span>
+          )}
+        </div>
+        {lexBots.length > 0 ? (
+          <select
+            className={inputClass}
+            value={config.lexBotAliasArn ?? ""}
+            onChange={(e) => onChange({ ...config, lexBotAliasArn: e.target.value })}
+          >
+            <option value="">-- Select Lex Bot --</option>
+            {lexBots.map((b) => (
+              <option key={b.aliasArn} value={b.aliasArn}>{b.label}</option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="text"
+            className={inputClass}
+            placeholder="arn:aws:lex:region:account:bot-alias/botId/aliasId"
+            value={config.lexBotAliasArn ?? ""}
+            onChange={(e) => onChange({ ...config, lexBotAliasArn: e.target.value })}
+          />
+        )}
+      </div>
+
+      <div>
         <div className="flex items-center justify-between mb-2">
           <label className="block text-sm font-medium text-gray-700">Routing Rules</label>
           <button
@@ -75,7 +161,7 @@ export function JourneyConfigurator({ config, onChange, agents, queues }: Journe
         </div>
         <div className="space-y-2">
           {config.routingRules.length === 0 && (
-            <p className="text-xs text-gray-400">No routing rules yet. Click &quot;Add Rule&quot; to create one.</p>
+            <p className="text-xs text-gray-400">No routing rules yet.</p>
           )}
           {config.routingRules.map((rule, i) => (
             <RoutingRuleRow
@@ -96,13 +182,13 @@ export function JourneyConfigurator({ config, onChange, agents, queues }: Journe
           className={inputClass}
           value={config.fallbackQueueId}
           onChange={(e) => {
-            const q = queues.find((q) => q.id === e.target.value);
+            const q = queues.find((q) => q.arn === e.target.value);
             onChange({ ...config, fallbackQueueId: e.target.value, fallbackQueueName: q?.name ?? "" });
           }}
         >
           <option value="">-- Select Queue --</option>
           {queues.map((q) => (
-            <option key={q.id} value={q.id}>{q.name}</option>
+            <option key={q.id} value={q.arn}>{q.name}</option>
           ))}
         </select>
       </div>

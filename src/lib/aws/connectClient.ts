@@ -14,6 +14,12 @@ import {
   ListPhoneNumbersV2CommandInput,
   StartWebRTCContactCommand,
   StartWebRTCContactCommandInput,
+  CreateContactFlowCommand,
+  CreateContactFlowCommandInput,
+  UpdateContactFlowContentCommand,
+  UpdateContactFlowContentCommandInput,
+  ListBotsCommand,
+  ListBotsCommandInput,
 } from "@aws-sdk/client-connect";
 
 export function getConnectClient(region: string) {
@@ -52,5 +58,20 @@ export async function listPhoneNumbersV2(client: ConnectClient, input: ListPhone
 
 export async function startWebRTCContact(client: ConnectClient, input: StartWebRTCContactCommandInput) {
   const command = new StartWebRTCContactCommand(input);
+  return await client.send(command);
+}
+
+export async function createContactFlow(client: ConnectClient, input: CreateContactFlowCommandInput) {
+  const command = new CreateContactFlowCommand(input);
+  return await client.send(command);
+}
+
+export async function updateContactFlowContent(client: ConnectClient, input: UpdateContactFlowContentCommandInput) {
+  const command = new UpdateContactFlowContentCommand(input);
+  return await client.send(command);
+}
+
+export async function listLexV2Bots(client: ConnectClient, input: ListBotsCommandInput) {
+  const command = new ListBotsCommand(input);
   return await client.send(command);
 }

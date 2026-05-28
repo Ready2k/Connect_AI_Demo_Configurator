@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
             promptType: "ORCHESTRATION",
             apiFormat,
             promptTemplate,
-            enabled: true,
+            enabled: false,
           });
         }
       }

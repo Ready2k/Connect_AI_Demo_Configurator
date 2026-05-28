@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
 
     // 4. Q Connect API Write Test
     const client = getQConnectClient(config.aws.region);
-    const testFormat = config.agents.length > 0 ? config.agents[0].apiFormat : "MESSAGES";
+    const testFormat = config.agents.find(a => a.enabled)?.apiFormat ?? "MESSAGES";
 
     const payload: CreateAIPromptCommandInput = {
       assistantId: config.aws.assistantId,

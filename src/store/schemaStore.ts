@@ -33,7 +33,7 @@ export const useSchemaStore = create<SchemaState>()(
 
       hasConnectAssistantSchema: () => {
         const { library } = get();
-        return "Connect Assistant" in library.schemas;
+        return Object.keys(library.schemas).some(key => key.includes("Connect Assistant"));
       },
     }),
     {

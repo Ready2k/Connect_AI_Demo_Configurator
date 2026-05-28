@@ -3,26 +3,53 @@ import { deployProject } from "@/lib/aws/deployService";
 import { ProjectConfig } from "@/types/project";
 
 export async function POST(request: Request) {
-  try {
-    const { config, timestamp } = await request.json();
-    if (!config || !config.aws.region || !config.aws.assistantId) {
-      return NextResponse.json({ error: "Missing config, region, or assistantId." }, { status: 400 });
-    }
+  const { config, timestamp } = await request.json();
 
-    if (!config.aws.modelId || config.aws.modelId.trim() === "") {
-      return NextResponse.json({ 
-        success: false, 
-        error: "AI model ID is required for custom prompt deployment. Select a discovered model or enter a model ID manually." 
-      }, { status: 400 });
-    }
-
-
-    const result = await deployProject(config as ProjectConfig, timestamp || Date.now());
-    if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 400 });
-    }
-    return NextResponse.json(result);
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message || "Internal Server Error" }, { status: 500 });
+  // Validation — return plain JSON errors before streaming begins
+  if (!config || !config.aws.region || !config.aws.assistantId) {
+    return NextResponse.json({ error: "Missing config, region, or assistantId." }, { status: 400 });
   }
+
+  if (!config.aws.modelId || config.aws.modelId.trim() === "") {
+    return NextResponse.json({
+      success: false,
+      error: "AI model ID is required for custom prompt deployment. Select a discovered model or enter a model ID manually."
+    }, { status: 400 });
+  }
+
+  const enabledAgents = (config as ProjectConfig).agents.filter((a: { enabled: boolean }) => a.enabled);
+  if (enabledAgents.length === 0) {
+    return NextResponse.json({ success: false, error: "No agents are selected for deployment. Enable at least one agent on the Agents page." }, { status: 400 });
+  }
+
+  // Stream deployment progress as SSE
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const emit = (event: object) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      };
+
+      try {
+        const result = await deployProject(
+          config as ProjectConfig,
+          timestamp || Date.now(),
+          (event) => emit(event)
+        );
+        emit({ type: "done", success: result.success, error: result.error, manifest: result.manifest });
+      } catch (e: any) {
+        emit({ type: "done", success: false, error: e.message || "Unknown error" });
+      } finally {
+        controller.close();
+      }
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    }
+  });
 }

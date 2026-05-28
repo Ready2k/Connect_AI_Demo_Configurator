@@ -84,7 +84,31 @@ export default function AgentsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Agents</h1>
           <p className="text-sm text-gray-500 mt-1">Configure your AI agents or import existing ones from AWS.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {projectConfig.agents.length > 0 && (
+            <span className="text-sm text-gray-500">
+              <span className="font-semibold text-gray-700">{projectConfig.agents.filter(a => a.enabled).length}</span>
+              {" of "}
+              <span className="font-semibold text-gray-700">{projectConfig.agents.length}</span>
+              {" selected for deployment"}
+            </span>
+          )}
+          {projectConfig.agents.length > 1 && (
+            <>
+              <button
+                onClick={() => updateProjectConfig({ agents: projectConfig.agents.map(a => ({ ...a, enabled: true })) })}
+                className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                Select All
+              </button>
+              <button
+                onClick={() => updateProjectConfig({ agents: projectConfig.agents.map(a => ({ ...a, enabled: false })) })}
+                className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                Deselect All
+              </button>
+            </>
+          )}
           <button
             onClick={handleFetchAgents}
             disabled={isFetching}

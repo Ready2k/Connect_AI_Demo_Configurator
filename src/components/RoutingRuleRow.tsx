@@ -6,7 +6,7 @@ interface RoutingRuleRowProps {
   rule: RoutingRule;
   onChange: (updated: RoutingRule) => void;
   agents: string[];
-  queues: Array<{ id: string; name: string }>;
+  queues: Array<{ id: string; arn: string; name: string }>;
   onRemove: () => void;
 }
 
@@ -58,13 +58,13 @@ export function RoutingRuleRow({ rule, onChange, agents, queues, onRemove }: Rou
           className={`${inputClass} w-36`}
           value={rule.targetQueueId ?? ""}
           onChange={(e) => {
-            const q = queues.find((q) => q.id === e.target.value);
+            const q = queues.find((q) => q.arn === e.target.value);
             onChange({ ...rule, targetQueueId: e.target.value, targetQueueName: q?.name ?? "" });
           }}
         >
           <option value="">-- Select Queue --</option>
           {queues.map((q) => (
-            <option key={q.id} value={q.id}>{q.name}</option>
+            <option key={q.id} value={q.arn}>{q.name}</option>
           ))}
         </select>
       )}

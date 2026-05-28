@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useProjectStore } from "@/store/projectStore";
 import { useSchemaStore } from "@/store/schemaStore";
 import { parseFlowContent, extractBlockSchemas } from "@/lib/flow/schemaParser";
@@ -31,6 +31,8 @@ export default function FlowDiscoveryPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const handleFetchFlows = async () => {
     setFetchingFlows(true);
@@ -68,6 +70,12 @@ export default function FlowDiscoveryPage() {
       parsed.name = selectedFlow.name;
       parsed.type = selectedFlow.type;
       setParsedFlow(parsed);
+      
+      // Auto-save schemas to library
+      const schemas = extractBlockSchemas(parsed.id, parsed.name, parsed);
+      mergeSchemas(schemas);
+      setSavedToast(true);
+      setTimeout(() => setSavedToast(false), 3000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to load flow";
       setLoadFlowError(msg);
@@ -93,6 +101,12 @@ export default function FlowDiscoveryPage() {
       parsed.type = "CONTACT_FLOW";
       setParsedFlow(parsed);
       setSelectedFlow({ id: "imported", name: "Imported Flow", type: "CONTACT_FLOW", status: "" });
+      
+      // Auto-save schemas to library
+      const schemas = extractBlockSchemas(parsed.id, parsed.name, parsed);
+      mergeSchemas(schemas);
+      setSavedToast(true);
+      setTimeout(() => setSavedToast(false), 3000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to parse JSON";
       setImportError(msg);
@@ -116,7 +130,7 @@ export default function FlowDiscoveryPage() {
         </p>
       </div>
 
-      {!hasConnectAssistantSchema() && (
+      {mounted && !hasConnectAssistantSchema() && (
         <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-r">
           <p className="text-sm text-yellow-700 font-medium">
             No Connect Assistant block found in your flows. Create a sample flow in the Amazon Connect
@@ -127,7 +141,7 @@ export default function FlowDiscoveryPage() {
 
       {savedToast && (
         <div className="bg-green-50 border-l-4 border-green-400 p-3 rounded-r">
-          <p className="text-sm text-green-700 font-medium">Schemas saved to library.</p>
+          <p className="text-sm text-green-700 font-medium">Schemas auto-saved to library.</p>
         </div>
       )}
 
@@ -238,13 +252,8 @@ export default function FlowDiscoveryPage() {
                     <p className="text-sm text-gray-600">
                       Found <strong>{parsedFlow.actions.length}</strong> blocks,{" "}
                       <strong>{parsedFlow.blockTypesFound.length}</strong> unique types.
+                      Schemas have been automatically added to your library.
                     </p>
-                    <button
-                      onClick={handleSaveSchemas}
-                      className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm font-medium"
-                    >
-                      Save Schemas to Library
-                    </button>
                   </div>
 
                   <div className="space-y-2">
@@ -257,7 +266,7 @@ export default function FlowDiscoveryPage() {
             </div>
           )}
 
-          {library.schemas && Object.keys(library.schemas).length > 0 && (
+          {mounted && library.schemas && Object.keys(library.schemas).length > 0 && (
             <div className="bg-white border border-gray-200 rounded-lg p-4">
               <h3 className="text-sm font-semibold text-gray-700 mb-2">
                 Schema Library ({Object.keys(library.schemas).length} types saved)
