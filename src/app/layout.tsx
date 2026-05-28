@@ -17,6 +17,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <script src="/connect-streams.js" async />
+      </head>
       <body className={inter.className}>
         <Layout>{children}</Layout>
       </body>

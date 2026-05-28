@@ -1,7 +1,7 @@
 "use client";
 import { useProjectStore } from "@/store/projectStore";
 import Link from "next/link";
-import { Download, Upload, Settings, Bot, Eye, Rocket, Network } from "lucide-react";
+import { Download, Upload, Settings, Bot, Eye, Rocket, Network, Search, Workflow } from "lucide-react";
 import { useRef, useEffect, useState } from "react";
 import { addLog } from "@/store/logStore";
 
@@ -90,6 +90,25 @@ export default function Home() {
           <h3 className="text-lg font-semibold text-gray-800">5. Flow Helper</h3>
           <p className="text-sm text-gray-500 mt-2">View routing decisions and integration payloads.</p>
         </Link>
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
+          <span className="w-1 h-5 bg-purple-500 rounded-full inline-block" />
+          Experience Builder
+        </h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Link href="/flow-discovery" className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 hover:border-purple-300 hover:shadow-md transition-all group block">
+            <Search className="w-8 h-8 text-purple-500 mb-4 group-hover:scale-110 transition-transform" />
+            <h3 className="text-lg font-semibold text-gray-800">6. Flow Discovery</h3>
+            <p className="text-sm text-gray-500 mt-2">Discover existing contact flows and extract block schemas.</p>
+          </Link>
+          <Link href="/experience" className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 hover:border-purple-300 hover:shadow-md transition-all group block">
+            <Workflow className="w-8 h-8 text-purple-500 mb-4 group-hover:scale-110 transition-transform" />
+            <h3 className="text-lg font-semibold text-gray-800">7. Experience Builder</h3>
+            <p className="text-sm text-gray-500 mt-2">Design, preview, and export a complete contact flow experience.</p>
+          </Link>
+        </div>
       </div>
 
       <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">

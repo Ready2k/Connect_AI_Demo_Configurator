@@ -26,10 +26,10 @@ export async function GET(req: NextRequest) {
 
     const response = await client.send(command);
     
-    const models = (response.models || []).map(m => ({
+    const models = (response.modelSummaries || []).map((m: any) => ({
       modelId: m.modelId,
       displayName: m.displayName
-    })).filter(m => m.modelId); // filter out if missing id
+    })).filter((m: any) => m.modelId); // filter out if missing id
 
     if (models.length === 0) {
       return NextResponse.json({
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
 
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: "Invalid parameters", details: error.errors }, { status: 400 });
+      return NextResponse.json({ error: "Invalid parameters", details: error.issues }, { status: 400 });
     }
     // Return clear AWS error messages without mapping it to an empty models list.
     return NextResponse.json({ error: error.message || "Failed to list models" }, { status: 500 });

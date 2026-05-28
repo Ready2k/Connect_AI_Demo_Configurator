@@ -16,10 +16,7 @@ export interface ProjectConfig {
   projectName: string;
   environmentName: string;
   aws: AwsSettings;
-  agents: {
-    customerIntentRouter: AgentConfig;
-    lostCard: AgentConfig;
-  };
+  agents: AgentConfig[];
   handoff: HandoffConfig;
   tags: Record<string, string>;
   demoFailureMode: DemoFailureMode;
@@ -33,9 +30,13 @@ export interface AwsSettings {
   visibilityStatus: VisibilityStatus;
   deploymentMode: DeploymentMode;
   nameSuffixMode: "none" | "environment" | "timestamp" | "environment_and_timestamp";
+  connectRegion: string;
+  connectInstanceUrl: string;
+  flowAssistantModelId: string;
 }
 
 export interface AgentConfig {
+  id: string;
   name: string;
   description: string;
   agentType: "ORCHESTRATION";
@@ -65,6 +66,7 @@ export interface DeployedPrompt {
   id: string;
   arn?: string;
   version?: string;
+  versionArn?: string;
   baseName: string;
   deployedName: string;
 }

@@ -4,14 +4,22 @@ import { useEffect, useState } from "react";
 import { Search, Loader2 } from "lucide-react";
 import { addLog } from "@/store/logStore";
 
+const FLOW_ASSISTANT_MODEL_OPTIONS = [
+  { value: "us.anthropic.claude-sonnet-4-6-20250514-v1:0", label: "Sonnet 4.6 (Recommended)" },
+  { value: "us.anthropic.claude-opus-4-7-20250514-v1:0", label: "Opus 4.7 (Best quality)" },
+  { value: "us.anthropic.claude-haiku-4-5-20251001-v1:0", label: "Haiku 4.5 (Economy)" },
+];
+
 export function SettingsForm() {
   const { projectConfig, updateProjectConfig } = useProjectStore();
   const [mounted, setMounted] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [discoveryData, setDiscoveryData] = useState<{ instances: any[], assistants: any[] } | null>(null);
-  
+
   const [fetchingModels, setFetchingModels] = useState(false);
   const [modelsData, setModelsData] = useState<{ models: any[], warning?: string } | null>(null);
+  const [derivingUrl, setDerivingUrl] = useState(false);
+  const [customModelId, setCustomModelId] = useState("");
 
   useEffect(() => {
     setMounted(true);
@@ -49,6 +57,29 @@ export function SettingsForm() {
       alert("Discovery failed: " + err.message);
     } finally {
       setDiscovering(false);
+    }
+  };
+
+  const handleDeriveInstanceUrl = async () => {
+    setDerivingUrl(true);
+    try {
+      const region = projectConfig.aws.connectRegion;
+      const connectInstanceId = projectConfig.aws.connectInstanceId;
+      if (!region || !connectInstanceId) {
+        alert("Set Connect Region and Connect Instance ID first.");
+        return;
+      }
+      const res = await fetch(`/api/aws/connect/instance?region=${region}&connectInstanceId=${connectInstanceId}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      updateProjectConfig({ aws: { ...projectConfig.aws, connectInstanceUrl: data.instanceUrl } });
+      addLog("SUCCESS", "Connect", `Derived instance URL: ${data.instanceUrl}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      addLog("ERROR", "Connect", `Failed to derive instance URL: ${msg}`);
+      alert("Failed: " + msg);
+    } finally {
+      setDerivingUrl(false);
     }
   };
 
@@ -135,7 +166,7 @@ export function SettingsForm() {
             {modelsData && modelsData.models.length > 0 ? (
               <select
                 className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm mb-2"
-                value={projectConfig.aws.modelId}
+                value={projectConfig.aws.modelId || ""}
                 onChange={(e) => updateProjectConfig({ aws: { ...projectConfig.aws, modelId: e.target.value } })}
               >
                 <option value="">-- Select an AI Model --</option>
@@ -150,7 +181,7 @@ export function SettingsForm() {
               type="text" 
               placeholder="Or enter Model ID manually"
               className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm text-gray-500" 
-              value={projectConfig.aws.modelId}
+              value={projectConfig.aws.modelId || ""}
               onChange={(e) => updateProjectConfig({ aws: { ...projectConfig.aws, modelId: e.target.value } })}
             />
             {modelsData && modelsData.models.length > 0 && projectConfig.aws.modelId && !modelsData.models.find((m: any) => m.modelId === projectConfig.aws.modelId) && (
@@ -183,8 +214,8 @@ export function SettingsForm() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Name Suffix Mode</label>
-            <select 
-              className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm" 
+            <select
+              className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
               value={projectConfig.aws.nameSuffixMode || "environment_and_timestamp"}
               onChange={(e) => updateProjectConfig({ aws: { ...projectConfig.aws, nameSuffixMode: e.target.value as any } })}
             >
@@ -193,6 +224,102 @@ export function SettingsForm() {
               <option value="timestamp">Timestamp</option>
               <option value="environment_and_timestamp">Environment + Timestamp</option>
             </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 space-y-4">
+        <h2 className="text-xl font-semibold mb-4 text-gray-800">Experience Builder Settings</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Connect Region</label>
+            <input
+              type="text"
+              className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+              placeholder="us-west-2"
+              value={projectConfig.aws.connectRegion || ""}
+              onChange={(e) => updateProjectConfig({ aws: { ...projectConfig.aws, connectRegion: e.target.value } })}
+            />
+            <p className="text-xs text-gray-400 mt-1">AWS region for your Amazon Connect instance.</p>
+          </div>
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="block text-sm font-medium text-gray-700">Connect Instance ID</label>
+            </div>
+            {discoveryData && discoveryData.instances && discoveryData.instances.length > 0 ? (
+              <select
+                className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm mb-2"
+                value={projectConfig.aws.connectInstanceId || ""}
+                onChange={(e) => updateProjectConfig({ aws: { ...projectConfig.aws, connectInstanceId: e.target.value } })}
+              >
+                <option value="">-- Select a Connect Instance --</option>
+                {discoveryData.instances.map((inst: any) => (
+                  <option key={inst.Id} value={inst.Id}>
+                    {inst.InstanceAlias} ({inst.Id})
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            <input 
+              type="text" 
+              placeholder="Or enter Connect Instance ID manually"
+              className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm text-gray-500" 
+              value={projectConfig.aws.connectInstanceId || ""}
+              onChange={(e) => updateProjectConfig({ aws: { ...projectConfig.aws, connectInstanceId: e.target.value } })}
+            />
+            <p className="text-xs text-gray-400 mt-1">Required to deploy AI Agents.</p>
+          </div>
+          <div className="col-span-1 md:col-span-2">
+            <div className="flex justify-between items-center mb-1">
+              <label className="block text-sm font-medium text-gray-700">Connect Instance URL</label>
+              <button
+                onClick={handleDeriveInstanceUrl}
+                disabled={derivingUrl}
+                className="text-sm flex items-center gap-1 text-blue-600 hover:text-blue-800 disabled:opacity-50 transition-colors"
+              >
+                {derivingUrl ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                {derivingUrl ? "Deriving..." : "Auto-derive"}
+              </button>
+            </div>
+            <input
+              type="text"
+              className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+              placeholder="https://your-instance.my.connect.aws"
+              value={projectConfig.aws.connectInstanceUrl || ""}
+              onChange={(e) => updateProjectConfig({ aws: { ...projectConfig.aws, connectInstanceUrl: e.target.value } })}
+            />
+            <p className="text-xs text-gray-400 mt-1">Used for WebRTC testing. Click Auto-derive to populate from your instance ID.</p>
+          </div>
+          <div className="col-span-1 md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Flow Assistant Model</label>
+            <select
+              className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm mb-2"
+              value={FLOW_ASSISTANT_MODEL_OPTIONS.some(o => o.value === projectConfig.aws.flowAssistantModelId) ? projectConfig.aws.flowAssistantModelId : "__custom__"}
+              onChange={(e) => {
+                if (e.target.value !== "__custom__") {
+                  updateProjectConfig({ aws: { ...projectConfig.aws, flowAssistantModelId: e.target.value } });
+                  setCustomModelId("");
+                }
+              }}
+            >
+              {FLOW_ASSISTANT_MODEL_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label} — {o.value}</option>
+              ))}
+              <option value="__custom__">Custom model ID...</option>
+            </select>
+            {(!FLOW_ASSISTANT_MODEL_OPTIONS.some(o => o.value === projectConfig.aws.flowAssistantModelId) || customModelId) && (
+              <input
+                type="text"
+                className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                placeholder="Enter custom cross-region inference profile ID"
+                value={customModelId || (!FLOW_ASSISTANT_MODEL_OPTIONS.some(o => o.value === projectConfig.aws.flowAssistantModelId) ? projectConfig.aws.flowAssistantModelId : "")}
+                onChange={(e) => {
+                  setCustomModelId(e.target.value);
+                  updateProjectConfig({ aws: { ...projectConfig.aws, flowAssistantModelId: e.target.value } });
+                }}
+              />
+            )}
+            <p className="text-xs text-gray-400 mt-1">Cross-region inference profile IDs. Verify availability in the Bedrock console.</p>
           </div>
         </div>
       </div>

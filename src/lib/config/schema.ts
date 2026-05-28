@@ -34,6 +34,7 @@ export const awsSettingsSchema = z.object({
 });
 
 export const agentConfigSchema = z.object({
+  id: z.string(),
   name: z.string().min(1, "Name is required"),
   description: z.string(),
   agentType: z.literal("ORCHESTRATION"),
@@ -63,10 +64,7 @@ export const projectConfigSchema = z.object({
   projectName: z.string().min(1, "Project name is required"),
   environmentName: z.string().min(1, "Environment name is required"),
   aws: awsSettingsSchema,
-  agents: z.object({
-    customerIntentRouter: agentConfigSchema,
-    lostCard: agentConfigSchema,
-  }),
+  agents: z.array(agentConfigSchema),
   handoff: handoffConfigSchema,
   tags: z.record(z.string(), z.string()).optional().default({}),
   demoFailureMode: demoFailureModeSchema,

@@ -3,80 +3,53 @@ import { CreateAIPromptCommandInput, CreateAIAgentCommandInput } from "@aws-sdk/
 import { computeDeployedName } from "../config/nameUtils";
 
 export interface PayloadResult {
-  customerIntentRouterPromptPayload: CreateAIPromptCommandInput;
-  lostCardPromptPayload: CreateAIPromptCommandInput;
-  customerIntentRouterAgentPayload: CreateAIAgentCommandInput;
-  lostCardAgentPayload: CreateAIAgentCommandInput;
+  promptPayloads: CreateAIPromptCommandInput[];
+  agentPayloads: CreateAIAgentCommandInput[];
 }
 
 export function buildPayloads(config: ProjectConfig, timestamp: number = Date.now()): PayloadResult {
   const { aws, agents, tags } = config;
 
-  const customerRouterName = computeDeployedName(agents.customerIntentRouter.name, config, timestamp);
-  const lostCardName = computeDeployedName(agents.lostCard.name, config, timestamp);
+  const promptPayloads: CreateAIPromptCommandInput[] = [];
+  const agentPayloads: CreateAIAgentCommandInput[] = [];
 
-  const customerIntentRouterPromptPayload: CreateAIPromptCommandInput = {
-    assistantId: aws.assistantId,
-    name: customerRouterName,
-    type: agents.customerIntentRouter.promptType,
-    templateType: "TEXT",
-    visibilityStatus: aws.visibilityStatus,
-    templateConfiguration: {
-      textFullAIPromptEditTemplateConfiguration: {
-        text: agents.customerIntentRouter.promptTemplate,
-      },
-    },
-    apiFormat: agents.customerIntentRouter.apiFormat,
-    modelId: config.aws.modelId,
-    tags,
-  };
+  for (const agent of agents) {
+    if (!agent.enabled) continue;
 
-  const lostCardPromptPayload: CreateAIPromptCommandInput = {
-    assistantId: aws.assistantId,
-    name: lostCardName,
-    type: agents.lostCard.promptType,
-    templateType: "TEXT",
-    visibilityStatus: aws.visibilityStatus,
-    templateConfiguration: {
-      textFullAIPromptEditTemplateConfiguration: {
-        text: agents.lostCard.promptTemplate,
-      },
-    },
-    apiFormat: agents.lostCard.apiFormat,
-    modelId: config.aws.modelId,
-    tags,
-  };
+    const deployedName = computeDeployedName(agent.name, config, timestamp);
 
-  const customerIntentRouterAgentPayload: CreateAIAgentCommandInput = {
-    assistantId: aws.assistantId,
-    name: customerRouterName,
-    type: agents.customerIntentRouter.agentType,
-    visibilityStatus: aws.visibilityStatus,
-    configuration: {
-      orchestrationAIAgentConfiguration: {
-        orchestrationAIPromptId: "",
+    promptPayloads.push({
+      assistantId: aws.assistantId,
+      name: deployedName,
+      type: agent.promptType,
+      templateType: "TEXT",
+      visibilityStatus: "PUBLISHED", // AWS requires referenced prompts to be PUBLISHED
+      templateConfiguration: {
+        textFullAIPromptEditTemplateConfiguration: {
+          text: agent.promptTemplate,
+        },
       },
-    },
-    tags,
-  };
+      apiFormat: agent.apiFormat,
+      modelId: config.aws.modelId,
+      tags,
+    });
 
-  const lostCardAgentPayload: CreateAIAgentCommandInput = {
-    assistantId: aws.assistantId,
-    name: lostCardName,
-    type: agents.lostCard.agentType,
-    visibilityStatus: aws.visibilityStatus,
-    configuration: {
-      orchestrationAIAgentConfiguration: {
-        orchestrationAIPromptId: "",
+    agentPayloads.push({
+      assistantId: aws.assistantId,
+      name: deployedName,
+      type: agent.agentType,
+      visibilityStatus: aws.visibilityStatus,
+      configuration: {
+        orchestrationAIAgentConfiguration: {
+          orchestrationAIPromptId: "",
+        },
       },
-    },
-    tags,
-  };
+      tags,
+    });
+  }
 
   return {
-    customerIntentRouterPromptPayload,
-    lostCardPromptPayload,
-    customerIntentRouterAgentPayload,
-    lostCardAgentPayload,
+    promptPayloads,
+    agentPayloads,
   };
 }

@@ -1,0 +1,69 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "QConnectAI",
+            "Effect": "Allow",
+            "Action": [
+                "wisdom:CreateAIPrompt",
+                "wisdom:CreateAIPromptVersion",
+                "wisdom:CreateAIAgent",
+                "wisdom:CreateAIAgentVersion",
+                "wisdom:GetAIPrompt",
+                "wisdom:DeleteAIPrompt",
+                "wisdom:ListAIPrompts",
+                "wisdom:ListAIAgents",
+                "wisdom:ListModels",
+                "wisdom:GetAssistant",
+                "wisdom:ListAssistants",
+                "wisdom:TagResource"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "ConnectRead",
+            "Effect": "Allow",
+            "Action": [
+                "connect:ListInstances",
+                "connect:DescribeInstance",
+                "connect:ListQueues",
+                "connect:DescribeQueue",
+                "connect:ListContactFlows",
+                "connect:DescribeContactFlow",
+                "connect:ListPhoneNumbers",
+                "connect:ListPhoneNumbersV2",
+                "connect:DescribePhoneNumber"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "ConnectWrite",
+            "Effect": "Allow",
+            "Action": [
+                "connect:UpdateContactFlowContent",
+                "connect:UpdateContactFlowMetadata",
+                "connect:AssociateBot"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "ConnectWebRTC",
+            "Effect": "Allow",
+            "Action": [
+                "connect:StartWebRTCContact"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "BedrockInference",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel",
+                "bedrock:InvokeModelWithResponseStream",
+                "bedrock:GetInferenceProfile",
+                "bedrock:ListInferenceProfiles"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

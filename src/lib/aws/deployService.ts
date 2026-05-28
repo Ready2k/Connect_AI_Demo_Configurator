@@ -9,6 +9,7 @@ import {
   listAiPrompts,
   listAiAgents,
 } from "./qconnectClient";
+import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 
 async function fetchAllPrompts(client: any, assistantId: string) {
   let nextToken: string | undefined;
@@ -51,10 +52,17 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
     const prompts: DeployedPrompt[] = [];
     const agents: DeployedAgent[] = [];
 
+    let accountId = "";
+    if (aws.deploymentMode.includes("agents")) {
+      const sts = new STSClient({ region: aws.region });
+      const identity = await sts.send(new GetCallerIdentityCommand({}));
+      accountId = identity.Account || "";
+    }
+
     // Duplicate detection
     if (aws.deploymentMode.includes("prompts")) {
       const existingPrompts = await fetchAllPrompts(client, aws.assistantId);
-      const targetNames = [payloads.customerIntentRouterPromptPayload.name, payloads.lostCardPromptPayload.name];
+      const targetNames = payloads.promptPayloads.map(p => p.name);
       for (const p of existingPrompts) {
         if (targetNames.includes(p.name)) {
           throw new Error(`Duplicate AI Prompt found: A prompt with name "${p.name}" already exists in the assistant. Deployment stopped to prevent conflicts. Please change the Name Suffix Mode or manually delete existing prompts.`);
@@ -64,7 +72,7 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
     
     if (aws.deploymentMode.includes("agents")) {
       const existingAgents = await fetchAllAgents(client, aws.assistantId);
-      const targetNames = [payloads.customerIntentRouterAgentPayload.name, payloads.lostCardAgentPayload.name];
+      const targetNames = payloads.agentPayloads.map(a => a.name);
       for (const a of existingAgents) {
         if (targetNames.includes(a.name)) {
           throw new Error(`Duplicate AI Agent found: An agent with name "${a.name}" already exists in the assistant. Deployment stopped to prevent conflicts. Please change the Name Suffix Mode or manually delete existing agents.`);
@@ -77,39 +85,41 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
       aws.deploymentMode === "create_prompts_only" ||
       aws.deploymentMode === "create_prompts_and_agents"
     ) {
-      // Intent Router Prompt
-      const routerPromptRes = await createAiPrompt(client, payloads.customerIntentRouterPromptPayload);
-      if (!routerPromptRes.aiPrompt?.aiPromptId) {
-        throw new Error("Failed to create Customer Intent Router Prompt: Expected prompt identifier in SDK response.");
-      }
-      const routerPromptVerRes = await createAiPromptVersion(client, {
-        assistantId: aws.assistantId,
-        aiPromptId: routerPromptRes.aiPrompt.aiPromptId,
-      });
-      prompts.push({
-        id: routerPromptRes.aiPrompt.aiPromptId,
-        arn: routerPromptRes.aiPrompt.aiPromptArn as string,
-        version: routerPromptVerRes.versionNumber?.toString(),
-        baseName: config.agents.customerIntentRouter.name,
-        deployedName: routerPromptRes.aiPrompt.name as string,
-      });
+      for (let i = 0; i < payloads.promptPayloads.length; i++) {
+        const p = payloads.promptPayloads[i];
+        const baseAgentConfig = config.agents.filter(a => a.enabled)[i];
+        const baseName = baseAgentConfig.name;
 
-      // Lost Card Prompt
-      const lostCardPromptRes = await createAiPrompt(client, payloads.lostCardPromptPayload);
-      if (!lostCardPromptRes.aiPrompt?.aiPromptId) {
-        throw new Error("Failed to create Lost Card Prompt: Expected prompt identifier in SDK response.");
+        let promptRes;
+        try {
+          promptRes = await createAiPrompt(client, p);
+        } catch (err: any) {
+          throw new Error(`Failed to create Prompt for '${baseName}': ${err.message}. Payload: ${JSON.stringify(p.templateConfiguration)}`);
+        }
+
+        if (!promptRes.aiPrompt?.aiPromptId) {
+          throw new Error(`Failed to create Prompt ${baseName}: Expected prompt identifier in SDK response.`);
+        }
+
+        let promptVerRes;
+        try {
+          promptVerRes = await createAiPromptVersion(client, {
+            assistantId: aws.assistantId,
+            aiPromptId: promptRes.aiPrompt.aiPromptId,
+          });
+        } catch (err: any) {
+          throw new Error(`Failed to create Prompt Version for '${baseName}': ${err.message}`);
+        }
+
+        prompts.push({
+          id: promptRes.aiPrompt.aiPromptId,
+          arn: promptRes.aiPrompt.aiPromptArn as string,
+          version: promptVerRes.versionNumber?.toString(),
+          versionArn: promptVerRes.aiPrompt?.aiPromptArn || `${promptRes.aiPrompt.aiPromptArn}:${promptVerRes.versionNumber}`,
+          baseName,
+          deployedName: promptRes.aiPrompt.name as string,
+        });
       }
-      const lostCardPromptVerRes = await createAiPromptVersion(client, {
-        assistantId: aws.assistantId,
-        aiPromptId: lostCardPromptRes.aiPrompt.aiPromptId,
-      });
-      prompts.push({
-        id: lostCardPromptRes.aiPrompt.aiPromptId,
-        arn: lostCardPromptRes.aiPrompt.aiPromptArn as string,
-        version: lostCardPromptVerRes.versionNumber?.toString(),
-        baseName: config.agents.lostCard.name,
-        deployedName: lostCardPromptRes.aiPrompt.name as string,
-      });
     }
 
     // 2. Create Agents (if allowed by mode)
@@ -117,47 +127,51 @@ export async function deployProject(config: ProjectConfig, timestamp: number): P
       aws.deploymentMode === "create_agents_only" ||
       aws.deploymentMode === "create_prompts_and_agents"
     ) {
-      // Intent Router Agent
-      if (payloads.customerIntentRouterAgentPayload.configuration?.orchestrationAIAgentConfiguration) {
-        payloads.customerIntentRouterAgentPayload.configuration.orchestrationAIAgentConfiguration.orchestrationAIPromptId = 
-          prompts.find(p => p.baseName === config.agents.customerIntentRouter.name)?.id || "";
-      }
-      const routerAgentRes = await createAiAgent(client, payloads.customerIntentRouterAgentPayload);
-      if (!routerAgentRes.aiAgent?.aiAgentId) {
-        throw new Error("Failed to create Customer Intent Router Agent: Expected agent identifier in SDK response.");
-      }
-      const routerAgentVerRes = await createAiAgentVersion(client, {
-        assistantId: aws.assistantId,
-        aiAgentId: routerAgentRes.aiAgent.aiAgentId,
-      });
-      agents.push({
-        id: routerAgentRes.aiAgent.aiAgentId,
-        arn: routerAgentRes.aiAgent.aiAgentArn as string,
-        version: routerAgentVerRes.versionNumber?.toString(),
-        baseName: config.agents.customerIntentRouter.name,
-        deployedName: routerAgentRes.aiAgent.name as string,
-      });
+      for (let i = 0; i < payloads.agentPayloads.length; i++) {
+        const a = payloads.agentPayloads[i];
+        const baseAgentConfig = config.agents.filter(agent => agent.enabled)[i];
+        const baseName = baseAgentConfig.name;
 
-      // Lost Card Agent
-      if (payloads.lostCardAgentPayload.configuration?.orchestrationAIAgentConfiguration) {
-        payloads.lostCardAgentPayload.configuration.orchestrationAIAgentConfiguration.orchestrationAIPromptId = 
-          prompts.find(p => p.baseName === config.agents.lostCard.name)?.id || "";
+        if (a.configuration?.orchestrationAIAgentConfiguration) {
+          const targetPrompt = prompts.find(p => p.baseName === baseName);
+          a.configuration.orchestrationAIAgentConfiguration.orchestrationAIPromptId = 
+            targetPrompt?.version ? `${targetPrompt.id}:${targetPrompt.version}` : (targetPrompt?.id || "");
+          if (aws.connectRegion && aws.connectInstanceId) {
+            a.configuration.orchestrationAIAgentConfiguration.connectInstanceArn = 
+              `arn:aws:connect:${aws.connectRegion}:${accountId}:instance/${aws.connectInstanceId}`;
+          }
+        }
+        
+        let agentRes;
+        try {
+          agentRes = await createAiAgent(client, a);
+        } catch (err: any) {
+          const fullErrorDetails = `Name: ${err.name}, Message: ${err.message}, Fault: ${err.$fault || 'unknown'}, Metadata: ${JSON.stringify(err.$metadata || {})}`;
+          throw new Error(`Failed to create Agent for '${baseName}': ${fullErrorDetails}. Prompt ID used: ${a.configuration?.orchestrationAIAgentConfiguration?.orchestrationAIPromptId}`);
+        }
+
+        if (!agentRes.aiAgent?.aiAgentId) {
+          throw new Error(`Failed to create Agent ${baseName}: Expected agent identifier in SDK response.`);
+        }
+
+        let agentVerRes;
+        try {
+          agentVerRes = await createAiAgentVersion(client, {
+            assistantId: aws.assistantId,
+            aiAgentId: agentRes.aiAgent.aiAgentId,
+          });
+        } catch (err: any) {
+          throw new Error(`Failed to create Agent Version for '${baseName}': ${err.message}`);
+        }
+
+        agents.push({
+          id: agentRes.aiAgent.aiAgentId,
+          arn: agentRes.aiAgent.aiAgentArn as string,
+          version: agentVerRes.versionNumber?.toString(),
+          baseName,
+          deployedName: agentRes.aiAgent.name as string,
+        });
       }
-      const lostCardAgentRes = await createAiAgent(client, payloads.lostCardAgentPayload);
-      if (!lostCardAgentRes.aiAgent?.aiAgentId) {
-        throw new Error("Failed to create Lost Card Agent: Expected agent identifier in SDK response.");
-      }
-      const lostCardAgentVerRes = await createAiAgentVersion(client, {
-        assistantId: aws.assistantId,
-        aiAgentId: lostCardAgentRes.aiAgent.aiAgentId,
-      });
-      agents.push({
-        id: lostCardAgentRes.aiAgent.aiAgentId,
-        arn: lostCardAgentRes.aiAgent.aiAgentArn as string,
-        version: lostCardAgentVerRes.versionNumber?.toString(),
-        baseName: config.agents.lostCard.name,
-        deployedName: lostCardAgentRes.aiAgent.name as string,
-      });
     }
 
     const manifest: DeploymentManifest = {

@@ -15,11 +15,15 @@ export const defaultProjectConfig: ProjectConfig = {
     visibilityStatus: (process.env.DEFAULT_VISIBILITY_STATUS as any) || "SAVED",
     deploymentMode: "preview_only",
     nameSuffixMode: "environment_and_timestamp",
+    connectRegion: process.env.CONNECT_REGION || "us-west-2",
+    connectInstanceUrl: process.env.CONNECT_INSTANCE_URL || "",
+    flowAssistantModelId: process.env.FLOW_ASSISTANT_MODEL_ID || "us.anthropic.claude-sonnet-4-6-20250514-v1:0",
   },
-  agents: {
-    customerIntentRouter: {
+  agents: [
+    {
+      id: "customerIntentRouter",
       name: "CustomerIntentRouter",
-      description: "Captures customer reason for calling and routes to the correct specialist self-service journey",
+      description: "Routes customer intent to the correct agent.",
       agentType: "ORCHESTRATION",
       promptType: "ORCHESTRATION",
       apiFormat: "MESSAGES",
@@ -27,17 +31,17 @@ export const defaultProjectConfig: ProjectConfig = {
       sourceBase: "SelfServiceOrchestrator",
       enabled: true,
     },
-    lostCard: {
+    {
+      id: "lostCard",
       name: "LostCard",
-      description: "Self-service AI agent for authenticated lost, stolen, damaged and retained card journeys",
+      description: "Handles lost card flows.",
       agentType: "ORCHESTRATION",
       promptType: "ORCHESTRATION",
-      apiFormat: "MESSAGES",
+      apiFormat: "TEXT_COMPLETIONS",
       promptTemplate: defaultLostCardPrompt,
-      sourceBase: "SelfServiceOrchestrator",
       enabled: true,
-    },
-  },
+    }
+  ],
   handoff: {
     humanQueueId: "",
     humanQueueArn: "",

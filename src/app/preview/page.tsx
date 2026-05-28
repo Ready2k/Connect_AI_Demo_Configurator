@@ -30,9 +30,9 @@ export default function PreviewPage() {
 
   if (!mounted) return null;
 
-  const hasTextCompletionsWarning = 
-    (projectConfig.agents.customerIntentRouter.promptType === "ORCHESTRATION" && projectConfig.agents.customerIntentRouter.apiFormat === "TEXT_COMPLETIONS") ||
-    (projectConfig.agents.lostCard.promptType === "ORCHESTRATION" && projectConfig.agents.lostCard.apiFormat === "TEXT_COMPLETIONS");
+  const hasTextCompletionsWarning = projectConfig.agents.some(
+    agent => agent.promptType === "ORCHESTRATION" && agent.apiFormat === "TEXT_COMPLETIONS"
+  );
 
   return (
     <div className="space-y-6">
@@ -61,10 +61,12 @@ export default function PreviewPage() {
         <div className="text-gray-500">Loading payloads...</div>
       ) : (
         <div className="space-y-6">
-          <PayloadViewer title="CreateAIPrompt (CustomerIntentRouter)" payload={payloads.customerIntentRouterPromptPayload} />
-          <PayloadViewer title="CreateAIPrompt (LostCard)" payload={payloads.lostCardPromptPayload} />
-          <PayloadViewer title="CreateAIAgent (CustomerIntentRouter)" payload={payloads.customerIntentRouterAgentPayload} />
-          <PayloadViewer title="CreateAIAgent (LostCard)" payload={payloads.lostCardAgentPayload} />
+          {payloads.promptPayloads?.map((p: any, i: number) => (
+            <PayloadViewer key={`prompt-${i}`} title={`CreateAIPrompt (${p.name})`} payload={p} />
+          ))}
+          {payloads.agentPayloads?.map((a: any, i: number) => (
+            <PayloadViewer key={`agent-${i}`} title={`CreateAIAgent (${a.name})`} payload={a} />
+          ))}
         </div>
       )}
     </div>

@@ -66,10 +66,12 @@ export function DeploymentStepper() {
   const steps = [
     { name: "Validate Configuration", status: "complete" },
     { name: "Check Credentials", status: "complete" },
-    { name: "Create/Update Customer Intent Router Prompt", status: projectConfig.aws.deploymentMode.includes("prompts") ? "pending" : "skipped" },
-    { name: "Create/Update Lost Card Prompt", status: projectConfig.aws.deploymentMode.includes("prompts") ? "pending" : "skipped" },
-    { name: "Create/Update Customer Intent Router Agent", status: projectConfig.aws.deploymentMode.includes("agents") ? "pending" : "skipped" },
-    { name: "Create/Update Lost Card Agent", status: projectConfig.aws.deploymentMode.includes("agents") ? "pending" : "skipped" },
+    ...projectConfig.agents.flatMap(agent => [
+      { name: `Create/Update ${agent.name} Prompt`, status: projectConfig.aws.deploymentMode.includes("prompts") ? "pending" : "skipped" },
+    ]),
+    ...projectConfig.agents.flatMap(agent => [
+      { name: `Create/Update ${agent.name} Agent`, status: projectConfig.aws.deploymentMode.includes("agents") ? "pending" : "skipped" },
+    ]),
     { name: "Save Manifest", status: "pending" },
   ];
 
@@ -140,8 +142,11 @@ export function DeploymentStepper() {
       <div className="bg-gray-50 p-4 rounded-md border border-gray-200">
         <h3 className="text-sm font-semibold text-gray-700 mb-2">Target Deployment Names</h3>
         <ul className="text-sm text-gray-600 space-y-1">
-          <li><strong>Router Prompt/Agent:</strong> {computeDeployedName(projectConfig.agents.customerIntentRouter.name, projectConfig, Date.now()).replace(/_\d+$/, '_<timestamp>')}</li>
-          <li><strong>Lost Card Prompt/Agent:</strong> {computeDeployedName(projectConfig.agents.lostCard.name, projectConfig, Date.now()).replace(/_\d+$/, '_<timestamp>')}</li>
+          {projectConfig.agents.map((agent, i) => (
+            <li key={i}>
+              <strong>{agent.name} Prompt/Agent:</strong> {computeDeployedName(agent.name, projectConfig, Date.now()).replace(/_\d+$/, '_<timestamp>')}
+            </li>
+          ))}
         </ul>
       </div>
 

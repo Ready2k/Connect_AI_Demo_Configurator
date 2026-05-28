@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { ReactNode } from "react";
-import { Home, Settings, Bot, Eye, Rocket, ScrollText } from "lucide-react";
+import { Home, Settings, Bot, Eye, Rocket, ScrollText, Search, Workflow } from "lucide-react";
 import { LogsSidebar } from "./LogsSidebar";
 import { useLogStore } from "@/store/logStore";
 
@@ -31,6 +31,14 @@ export function Layout({ children }: { children: ReactNode }) {
           </Link>
           <Link href="/deploy" className="flex items-center gap-2 p-2 hover:bg-gray-100 rounded text-gray-700 font-medium transition-colors">
             <Rocket className="w-5 h-5" /> Deploy
+          </Link>
+          <div className="border-t border-gray-200 my-2" />
+          <p className="text-xs text-gray-400 uppercase tracking-wider px-2 pb-1">Experience</p>
+          <Link href="/flow-discovery" className="flex items-center gap-2 p-2 hover:bg-gray-100 rounded text-gray-700 font-medium transition-colors">
+            <Search className="w-5 h-5" /> Flow Discovery
+          </Link>
+          <Link href="/experience" className="flex items-center gap-2 p-2 hover:bg-gray-100 rounded text-gray-700 font-medium transition-colors">
+            <Workflow className="w-5 h-5" /> Experience Builder
           </Link>
         </nav>
       </aside>
