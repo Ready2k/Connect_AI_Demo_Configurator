@@ -3,12 +3,54 @@ import type { BlockSchemaLibrary, } from "@/types/flowSchema";
 import type { JourneyConfig, GenerationResult, GenerationLogEntry, VerificationResult } from "@/types/experience";
 
 function stripMarkdownFences(text: string): string {
-  return text.replace(/^```(?:json)?\s*\r?\n([\s\S]*?)\r?\n```\s*$/, "$1").trim();
+  const trimmed = text.trim();
+  // Accept any whitespace (space or newline) between the fence/language tag and the content
+  const match = trimmed.match(/^```(?:\w+)?\s*([\s\S]*?)\s*```$/);
+  if (match) return match[1].trim();
+  return trimmed;
+}
+
+export interface AgentContext {
+  name: string;
+  description: string;
+  promptTemplate: string;
+  tools: Array<{ name: string; description?: string }>;
+}
+
+function buildAgentContextSection(ctx: AgentContext): string {
+  const toolLines = ctx.tools.length > 0
+    ? ctx.tools.map((t) => `  - ${t.name}${t.description ? `: ${t.description}` : ""}`).join("\n")
+    : "  (none configured)";
+
+  // Strip the raw YAML prompt down to just the system block for readability
+  const systemMatch = ctx.promptTemplate.match(/^system:\s*\|\s*\n([\s\S]*?)(?=\nmessages:|\s*$)/m);
+  const systemContent = systemMatch
+    ? systemMatch[1].replace(/^ {2}/gm, "").trim()
+    : ctx.promptTemplate.slice(0, 3000).trim();
+
+  return `
+ENTRY AGENT CONTEXT
+===================
+The Q Connect AI Agent this flow hands the customer to is: "${ctx.name}"
+
+Purpose: ${ctx.description || "(no description provided)"}
+
+Tools this agent can invoke (these are the exact values it signals via $.Lex.SessionAttributes.Tool —
+use these names verbatim in the Compare block Conditions):
+${toolLines}
+
+Agent system prompt (understand this to know what goal the flow must serve, what the agent can and
+cannot do, and why certain routing conditions are meaningful):
+--- BEGIN AGENT PROMPT ---
+${systemContent}
+--- END AGENT PROMPT ---
+`;
 }
 
 function buildGenerationSystemPrompt(
   journeyConfig: JourneyConfig,
-  library: BlockSchemaLibrary
+  library: BlockSchemaLibrary,
+  agentContext?: AgentContext
 ): string {
   const schemaJson = JSON.stringify(library.schemas, null, 2);
 
@@ -26,84 +68,94 @@ function buildGenerationSystemPrompt(
   // Versioned agent ARN — Connect requires :$LATEST suffix on OrchestrationAIAgentConfiguration
   const versionedAgentArn = agentArn.endsWith(":$LATEST") ? agentArn : `${agentArn}:$LATEST`;
 
-  // Each "queue" routing rule sets a specific queue then disconnects.
-  // Each "disconnect" or "agent" rule just disconnects.
-  // The queue is set upfront (block 2) so all error paths can safely use DisconnectParticipant.
+  const lexBotAliasArn = journeyConfig.lexBotAliasArn || "REPLACE_WITH_LEX_BOT_ALIAS_ARN";
+
+  // Each "queue" routing rule transfers to that specific queue (real handoff).
+  // Each "disconnect" or "agent" rule ends the call.
   const rulesText = journeyConfig.routingRules
     .map((r) => {
       if (r.action === "queue") {
         const qId = r.targetQueueId || "REPLACE_WITH_QUEUE_ARN";
-        return `   - Condition "${r.condition}": UpdateContactTargetQueue (QueueId = "${qId}") → DisconnectParticipant (Parameters: {}, Transitions: {})`;
+        return `   - Condition "${r.condition}": UpdateContactTargetQueue (QueueId: "${qId}") -> TransferContactToQueue (Parameters: {}, Transitions to fallback on NextAction/QueueAtCapacity/NoMatchingError)`;
       }
       return `   - Condition "${r.condition}": DisconnectParticipant (Parameters: {}, Transitions: {})`;
     })
     .join("\n");
 
-  return `You are generating an Amazon Connect Contact Flow JSON document.
+  const agentContextSection = agentContext ? buildAgentContextSection(agentContext) : "";
 
+  return `You are generating an Amazon Connect Contact Flow JSON document.
+${agentContextSection}
 STRICT OUTPUT RULES:
-1. Return ONLY valid JSON — no markdown fences, no comments, no prose.
-2. The top-level "Version" field MUST be exactly "2019-10-30".
-3. Use sequential identifiers: "b0000001-0000-0000-0000-000000000001", "b0000001-0000-0000-0000-000000000002", etc.
+The generated output must be EXACTLY valid JSON, starting with { and ending with }. Do NOT wrap it in markdown block quotes.
+
+The root structure of the JSON MUST be exactly:
+{
+  "Version": "2019-10-30",
+  "StartAction": "<identifier-of-block-1>",
+  "Actions": [
+    // array of blocks
+  ]
+}
+
+For all Blocks (Actions), generate standard UUIDs for their 'Identifier' fields (e.g. "b0000001-0000-0000-0000-000000000001")., "b0000001-0000-0000-0000-000000000002", etc.
 4. Every action MUST have all four keys: "Parameters" (use {} if none), "Identifier", "Type", "Transitions".
 5. Do NOT invent template variables. Use the literal ARN/ID strings provided below.
-6. Do NOT use TransferContactToQueue or ConnectParticipantWithLexBot — they are not in the required pattern.
 
 RESOURCE VALUES (use these exact strings):
   Wisdom Assistant ARN               : "${assistantArn}"
   Q Connect AI Agent ARN (versioned) : "${versionedAgentArn}"
   Fallback Queue ARN/ID              : "${fallbackQueueId}"
+  Lex Bot Alias ARN                  : "${lexBotAliasArn}"
 
 MANDATORY BLOCK SEQUENCE — generate exactly these blocks in this order:
 
 Block 1 — UpdateFlowLoggingBehavior:
   Parameters: { "FlowLoggingBehavior": "Enabled" }
   Transitions: { "NextAction": "<block2>" }
-  *** No Errors array on this block — Connect rejects it ***
+  *** No Errors array — Connect rejects it on this block type ***
 
-Block 2 — UpdateContactTargetQueue (set fallback queue upfront):
+Block 2 — UpdateContactTargetQueue (set fallback queue upfront so all error paths are safe):
   Parameters: { "QueueId": "${fallbackQueueId}" }
   Transitions: { "NextAction": "<block3>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
 
-Block 3 — CreateWisdomSession:
-  Parameters: {
-    "WisdomAssistantArn": "${assistantArn}",
-    "OrchestrationAIAgentConfiguration": {
-      "AgentAssistanceAgentVersionArn": "${versionedAgentArn}"
-    }
-  }
+Block 3 — CreateWisdomSession (initialise Q Connect — the AI agent is configured on the assistant, NOT here):
+  *** Only WisdomAssistantArn is accepted. Do NOT add OrchestrationAIAgentConfiguration or any other key. ***
+  Parameters: { "WisdomAssistantArn": "${assistantArn}" }
   Transitions: { "NextAction": "<block4>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
 
-Block 4 — UpdateContactData (store Wisdom session ARN):
-  Parameters: { "WisdomSessionArn": "$.Wisdom.SessionArn" }
+Block 4 — ConnectParticipantWithLexBot (invoke the Q Connect AI agent via the Lex bot):
+  *** THIS IS THE BLOCK THAT RUNS THE AI AGENT CONVERSATION ***
+  The block type is ConnectParticipantWithLexBot.
+  The customer speaks to the Lex bot here. The Lex bot drives the full multi-turn conversation.
+  When the AI agent calls a tool (Complete, Escalate, etc.) Lex exits and the flow continues.
+  Parameters: {
+    "Text": "${journeyConfig.welcomeMessage}",
+    "LexV2Bot": {
+      "AliasArn": "${lexBotAliasArn}"
+    }
+  }
   Transitions: { "NextAction": "<block5>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
 
-Block 5 — UpdateContactAttributes (expose session ARN as contact attribute):
-  Parameters: { "Attributes": { "wisdomSessionArn": "$.Wisdom.SessionArn" }, "TargetContact": "Current" }
-  Transitions: { "NextAction": "<block6>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
-
-Block 6 — MessageParticipant (welcome greeting):
-  Parameters: { "Text": "${journeyConfig.welcomeMessage}", "SkipWhenDTMFBufferEnabled": "false" }
-  Transitions: { "NextAction": "<block7_compare>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
-
-Block 7 — Compare (route on Q Connect agent tool signal):
+Block 5 — Compare (read the tool signal set by the AI agent and route accordingly):
   Parameters: { "ComparisonValue": "$.Lex.SessionAttributes.Tool" }
   Transitions:
-    "NextAction": "<fallback>"
+    "NextAction": "<fallback>"  (default — no condition matched)
     "Conditions": [ one entry per routing rule below ]
     "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingCondition" }]
 
-ROUTING CONDITIONS for the Compare block (each generates one or two blocks after block 7):
+ROUTING CONDITIONS for the Compare block (generate one block per rule after block 5):
 ${rulesText}
-  Default (NextAction, no condition match) → <fallback>
+  Default (NextAction, no condition matched) → <fallback>
   Errors (NoMatchingCondition) → <fallback>
 
-FALLBACK BLOCK (shared by all error paths and the Compare default):
+FALLBACK BLOCK (shared terminal for all unmatched/error paths):
   Type: DisconnectParticipant, Parameters: {}, Transitions: {}
 
 TERMINAL BLOCK RULES:
-  DisconnectParticipant: MUST have Parameters: {} and Transitions: {} — never omit Parameters.
-  UpdateContactTargetQueue before DisconnectParticipant: set QueueId, then next block is DisconnectParticipant.
+  TransferContactToQueue: NOT terminal. MUST have Parameters: {}. Transitions MUST include NextAction, and Errors for "QueueAtCapacity" and "NoMatchingError". Route all of these to <fallback>.
+  DisconnectParticipant: terminal — MUST have Parameters: {} and Transitions: {}.
+  ConnectParticipantWithLexBot: NOT terminal — it continues to the Compare block when the bot session ends.
 
 ERRORS RULES:
   Every non-terminal block MUST have an Errors array in its Transitions.
@@ -115,21 +167,71 @@ DISCOVERED BLOCK SCHEMAS (reference for parameter/transition shapes):
 ${schemaJson}`;
 }
 
+function buildFeedbackSection(feedback: {
+  issues: unknown[];
+  suggestions: unknown[];
+  previousFlowJson: string;
+}): string {
+  const fmt = (item: unknown): string => {
+    if (typeof item === "string") return item;
+    if (item && typeof item === "object") {
+      const o = item as Record<string, unknown>;
+      const parts = [o.severity ?? o.priority, o.issue ?? o.summary ?? o.suggestion ?? o.title, o.description ?? o.details ?? o.detail]
+        .filter(Boolean)
+        .map(String);
+      return parts.length > 0 ? parts.join(" — ") : JSON.stringify(item);
+    }
+    return String(item);
+  };
+
+  const issueLines = feedback.issues.map((v, i) => `${i + 1}. ${fmt(v)}`).join("\n");
+  const suggestionLines = feedback.suggestions.map((v, i) => `${i + 1}. ${fmt(v)}`).join("\n");
+
+  return `PREVIOUS GENERATION FEEDBACK — you MUST address every point below in your new flow:
+
+ISSUES TO FIX:
+${issueLines || "(none)"}
+
+SUGGESTIONS TO INCORPORATE:
+${suggestionLines || "(none)"}
+
+PREVIOUS FLOW JSON (for reference — do NOT copy it verbatim; rewrite it fixing all issues above):
+${feedback.previousFlowJson}`;
+}
+
 export async function generateFlow(args: {
   journeyConfig: JourneyConfig;
   library: BlockSchemaLibrary;
   modelId: string;
   region: string;
+  agentContext?: AgentContext;
+  verificationFeedback?: { issues: unknown[]; suggestions: unknown[]; previousFlowJson: string };
 }): Promise<GenerationResult> {
-  const { journeyConfig, library, modelId, region } = args;
+  const { journeyConfig, library, modelId, region, agentContext, verificationFeedback } = args;
   const logs: GenerationLogEntry[] = [];
   const client = getBedrockClient(region);
-  const systemPrompt = buildGenerationSystemPrompt(journeyConfig, library);
+  const systemPrompt = buildGenerationSystemPrompt(journeyConfig, library, agentContext);
+
+  const userText = verificationFeedback
+    ? `Generate an improved contact flow JSON now.\n\n${buildFeedbackSection(verificationFeedback)}`
+    : "Generate the contact flow JSON now.";
+
   const messages = [
-    { role: "user" as const, content: [{ text: "Generate the contact flow JSON now." }] },
+    { role: "user" as const, content: [{ text: userText }] },
   ];
 
-  logs.push({ level: "INFO", message: "Sending generation request to Bedrock", details: { modelId, region, entryAgent: journeyConfig.entryAgentName, ruleCount: journeyConfig.routingRules.length } });
+  logs.push({
+    level: "INFO",
+    message: verificationFeedback ? "Sending regeneration request with feedback to Bedrock" : "Sending generation request to Bedrock",
+    details: {
+      modelId, region,
+      entryAgent: journeyConfig.entryAgentName,
+      ruleCount: journeyConfig.routingRules.length,
+      withAgentContext: !!agentContext,
+      agentToolCount: agentContext?.tools.length ?? 0,
+      withFeedback: !!verificationFeedback,
+    },
+  });
 
   let rawResponse: string;
   try {
@@ -213,11 +315,28 @@ export async function verifyFlow(args: {
 
   const cleaned = stripMarkdownFences(responseText);
   try {
-    const parsed = JSON.parse(cleaned) as { explanation?: string; issues?: string[]; suggestions?: string[] };
+    const parsed = JSON.parse(cleaned) as { explanation?: string; issues?: unknown[]; suggestions?: unknown[] };
+
+    const toStrings = (arr: unknown[] | undefined): string[] =>
+      Array.isArray(arr)
+        ? arr.map((item) => {
+            if (typeof item === "string") return item;
+            if (item && typeof item === "object") {
+              const o = item as Record<string, unknown>;
+              // Handle {severity, issue, description} or similar object shapes
+              const parts = [o.severity, o.issue ?? o.summary ?? o.title, o.description ?? o.detail]
+                .filter(Boolean)
+                .map(String);
+              return parts.length > 0 ? parts.join(" — ") : JSON.stringify(item);
+            }
+            return String(item);
+          })
+        : [];
+
     return {
-      explanation: parsed.explanation ?? cleaned,
-      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+      explanation: typeof parsed.explanation === "string" ? parsed.explanation : cleaned,
+      issues: toStrings(parsed.issues),
+      suggestions: toStrings(parsed.suggestions),
       verifiedAt: new Date().toISOString(),
     };
   } catch {

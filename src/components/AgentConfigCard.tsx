@@ -1,5 +1,5 @@
 "use client";
-import { AgentConfig, AgentToolConfig, AgentGuardrailConfig } from "@/types/project";
+import { AgentConfig, AgentToolConfig, AgentGuardrailConfig, AwsSettings } from "@/types/project";
 import { PromptEditor } from "./PromptEditor";
 import { useState } from "react";
 
@@ -8,6 +8,7 @@ interface AgentConfigCardProps {
   onChange: (config: AgentConfig) => void;
   onRemove: () => void;
   onClose: () => void;
+  aws?: AwsSettings;
 }
 
 const LOCALES = [
@@ -27,7 +28,7 @@ const MOCK_SECURITY_PROFILES = [
   "Supervisor"
 ];
 
-export function AgentConfigCard({ config, onChange, onRemove, onClose }: AgentConfigCardProps) {
+export function AgentConfigCard({ config, onChange, onRemove, onClose, aws }: AgentConfigCardProps) {
   const [activeTab, setActiveTab] = useState<"details" | "prompts" | "tools" | "security" | "guardrails">("details");
 
   const handleSaveDraft = () => {
@@ -282,10 +283,12 @@ export function AgentConfigCard({ config, onChange, onRemove, onClose }: AgentCo
               <h4 className="text-md font-semibold text-gray-800">Edit Prompt Template</h4>
               <span className="text-xs font-medium text-gray-500">Format: YAML</span>
             </div>
-            <PromptEditor 
+            <PromptEditor
               value={config.promptTemplate}
               onChange={(val) => onChange({ ...config, promptTemplate: val })}
               onReset={() => onChange({ ...config, promptTemplate: "" })}
+              agentName={config.name}
+              aws={aws}
             />
           </div>
         </div>

@@ -89,11 +89,12 @@ export default function AgentsPage() {
   if (editingAgentIndex !== null && projectConfig.agents[editingAgentIndex]) {
     return (
       <div className="h-[calc(100vh-6rem)] -mt-6 -mx-6 md:-mt-8 md:-mx-8 lg:-mt-8 lg:-mx-8">
-        <AgentConfigCard 
+        <AgentConfigCard
           config={projectConfig.agents[editingAgentIndex]}
           onChange={(updated) => handleUpdateAgent(editingAgentIndex, updated)}
           onRemove={() => handleRemoveAgent(editingAgentIndex)}
           onClose={() => setEditingAgentIndex(null)}
+          aws={projectConfig.aws}
         />
       </div>
     );

@@ -120,8 +120,8 @@ export function JourneyConfigurator({ config, onChange, agents, queues, qAgents,
       <div>
         <div className="flex items-center justify-between mb-1">
           <label className="block text-sm font-medium text-gray-700">
-            Lex Bot
-            <span className="ml-1 text-xs text-gray-400 font-normal">(ConnectParticipantWithLexBot)</span>
+            Q Connect Lex Bot
+            <span className="ml-1 text-xs font-normal text-gray-400">required — drives the AI agent conversation</span>
           </label>
           {config.lexBotAliasArn && lexBots.length === 1 && (
             <span className="text-xs text-green-600">auto-selected</span>
@@ -129,7 +129,7 @@ export function JourneyConfigurator({ config, onChange, agents, queues, qAgents,
         </div>
         {lexBots.length > 0 ? (
           <select
-            className={inputClass}
+            className={`${inputClass} ${!config.lexBotAliasArn ? "border-amber-400" : ""}`}
             value={config.lexBotAliasArn ?? ""}
             onChange={(e) => onChange({ ...config, lexBotAliasArn: e.target.value })}
           >
@@ -141,11 +141,16 @@ export function JourneyConfigurator({ config, onChange, agents, queues, qAgents,
         ) : (
           <input
             type="text"
-            className={inputClass}
+            className={`${inputClass} ${!config.lexBotAliasArn ? "border-amber-400" : ""}`}
             placeholder="arn:aws:lex:region:account:bot-alias/botId/aliasId"
             value={config.lexBotAliasArn ?? ""}
             onChange={(e) => onChange({ ...config, lexBotAliasArn: e.target.value })}
           />
+        )}
+        {!config.lexBotAliasArn && (
+          <p className="mt-1 text-xs text-amber-600">
+            Required for flow generation. Set this in Settings → Q Connect Lex Bot ARN or select above.
+          </p>
         )}
       </div>
 

@@ -73,8 +73,8 @@ function fixTransitions(t: Record<string, unknown>, blockType?: string): void {
 }
 
 // TransferToFlow is rejected by the CreateContactFlow API regardless of parameters.
-// TransferContactToQueue works when Parameters.QueueId is explicitly set.
-const ALWAYS_UNSUPPORTED = new Set(["TransferToFlow"]);
+// UpdateContactData is not a valid Connect flow block — Wisdom session ARN is accessed via $.Wisdom.SessionArn directly.
+const ALWAYS_UNSUPPORTED = new Set(["TransferToFlow", "UpdateContactData"]);
 
 function rewriteNextBlockId(obj: Record<string, unknown>): void {
   // Nova Pro variant 3: uses NextBlockId instead of NextAction throughout
@@ -210,20 +210,43 @@ function normalizeFlowContent(flowJson: string): string {
     if (ALWAYS_UNSUPPORTED.has(action.Type as string)) {
       action.Type = "DisconnectParticipant";
       action.Parameters = {};
-      action.Transitions = {};
+      delete action.Transitions;
     }
 
-    // TransferContactToQueue: works ONLY when Parameters.QueueId is explicitly set
+    // TransferContactToQueue: Connect requires Transitions for NextAction, QueueAtCapacity, and NoMatchingError
     if (action.Type === "TransferContactToQueue") {
-      const params = action.Parameters as Record<string, unknown> | undefined;
-      if (!params?.QueueId) {
-        action.Type = "DisconnectParticipant";
-        action.Parameters = {};
-        action.Transitions = {};
+      action.Parameters = {}; // Strip parameters, Connect relies on UpdateContactTargetQueue
+
+      const disconnectAction = actions.find((a) => a.Type === "DisconnectParticipant");
+      const fallbackActionId = disconnectAction?.Identifier ?? action.Identifier;
+
+      const t = (action.Transitions || {}) as Record<string, unknown>;
+      const nextAction = t.NextAction ?? fallbackActionId;
+
+      let queueAtCapacityAction = fallbackActionId;
+      let noMatchingErrorAction = fallbackActionId;
+
+      if (Array.isArray(t.Errors)) {
+        const queueErr = t.Errors.find((e: any) => e.ErrorType === "QueueAtCapacity");
+        if (queueErr?.NextAction) queueAtCapacityAction = queueErr.NextAction;
+        
+        const noMatchErr = t.Errors.find((e: any) => e.ErrorType === "NoMatchingError");
+        if (noMatchErr?.NextAction) noMatchingErrorAction = noMatchErr.NextAction;
       }
-      // Remove Errors from TransferContactToQueue — it's a terminal block
-      const t2 = action.Transitions as Record<string, unknown> | undefined;
-      if (t2) { delete t2.Errors; delete t2.NextAction; }
+
+      action.Transitions = {
+        NextAction: nextAction,
+        Errors: [
+          { NextAction: queueAtCapacityAction, ErrorType: "QueueAtCapacity" },
+          { NextAction: noMatchingErrorAction, ErrorType: "NoMatchingError" }
+        ]
+      };
+    }
+
+    // DisconnectParticipant: Connect requires no Transitions block at all
+    if (action.Type === "DisconnectParticipant") {
+      if (!action.Parameters) action.Parameters = {};
+      delete action.Transitions;
     }
 
     // UpdateFlowLoggingBehavior rejects any Errors array in its transitions
@@ -232,19 +255,46 @@ function normalizeFlowContent(flowJson: string): string {
       if (t2) delete t2.Errors;
     }
 
-    // ConnectParticipantWithLexBot: stub as MessageParticipant (new flows use MessageParticipant directly)
-    if (action.Type === "ConnectParticipantWithLexBot") {
-      const params = action.Parameters as Record<string, unknown> | undefined;
-      action.Type = "MessageParticipant";
-      action.Parameters = {
-        Text: (params?.Text as string | undefined) ?? "Welcome. How can I help you today?",
-        SkipWhenDTMFBufferEnabled: "false",
-      };
+    // UpdateContactTargetQueue: Connect rejects QueueAtCapacity, it only takes NoMatchingError
+    if (action.Type === "UpdateContactTargetQueue") {
+      const t = action.Transitions as Record<string, unknown> | undefined;
+      if (t && Array.isArray(t.Errors)) {
+        t.Errors = t.Errors.filter((e: any) => e.ErrorType !== "QueueAtCapacity");
+      }
     }
 
-    // DisconnectParticipant: Connect requires Parameters: {} — never omit it
-    if (action.Type === "DisconnectParticipant") {
-      if (!action.Parameters) action.Parameters = {};
+    // CreateWisdomSession: only WisdomAssistantArn is accepted — strip any AI agent config added by older generators
+    if (action.Type === "CreateWisdomSession") {
+      const params = action.Parameters as Record<string, unknown> | undefined;
+      if (params) {
+        delete params.OrchestrationAIAgentConfiguration;
+        delete params.AIAgentArn;
+        delete params.AgentVersionArn;
+      }
+    }
+
+    // UpdateContactAttributes: remove wisdomSessionArn if its value is a dynamic reference —
+    // $.Wisdom.SessionArn is not valid as a static attribute value and causes InvalidContactFlowException
+    if (action.Type === "UpdateContactAttributes") {
+      const params = action.Parameters as Record<string, unknown> | undefined;
+      const attrs = params?.Attributes as Record<string, unknown> | undefined;
+      if (attrs) {
+        if (attrs.wisdomSessionArn === "$.Wisdom.SessionArn") {
+          delete attrs.wisdomSessionArn;
+        }
+        // Connect API rejects empty Attributes object
+        if (Object.keys(attrs).length === 0) {
+          attrs["_connect_builder_fix"] = "true";
+        }
+      }
+    }
+
+    // ConnectParticipantWithLexBot: Connect rejects SessionState (even as {}) — remove it if present
+    if (action.Type === "ConnectParticipantWithLexBot") {
+      const params = (action.Parameters ?? {}) as Record<string, unknown>;
+      delete params.SessionState;
+      action.Parameters = params;
+      // Not terminal — must have NextAction in Transitions
     }
 
     // UpdateContactAttributes: Connect requires TargetContact: "Current"
@@ -256,19 +306,95 @@ function normalizeFlowContent(flowJson: string): string {
         action.Parameters = { TargetContact: "Current" };
       }
     }
+
+    // Fix GetUserInput to ConnectParticipantWithLexBot (in case LLM uses the wrong name)
+    if (action.Type === "GetUserInput" || action.Type === "GetParticipantInput") {
+      // If it has LexV2Bot, it's definitely a Lex bot block
+      const p = action.Parameters as Record<string, unknown> | undefined;
+      if (p && p.LexV2Bot) {
+        action.Type = "ConnectParticipantWithLexBot";
+      }
+    }
+
+    // DO NOT wrap 'Text' in 'Media'. Connect API expects 'Text' directly for TTS/Chat messages.
+    if (action.Type === "MessageParticipant" || action.Type === "GetParticipantInput" || action.Type === "ConnectParticipantWithLexBot") {
+      const params = action.Parameters as Record<string, unknown> | undefined;
+      // If it accidentally got wrapped in Media due to earlier logic or UI export, unwrap it
+      if (params && params.Media && typeof params.Media === "object") {
+        const media = params.Media as Record<string, unknown>;
+        if (typeof media.Text === "string" && !media.Uri) {
+          params.Text = media.Text;
+          delete params.Media;
+        }
+      }
+    }
   }
 
-  // Final guard: re-scan all Compare blocks and enforce NoMatchingCondition.
-  // This catches any case where fixTransitions didn't fire (e.g. LLM already used the correct
-  // block shape but with the wrong error type, bypassing earlier mutation paths).
+  // Final guard: enforce strict ErrorType rules for all blocks to satisfy Connect API.
   for (const action of actions) {
-    if (action.Type !== "Compare") continue;
     const trans = action.Transitions as Record<string, unknown> | undefined;
-    if (!trans || !Array.isArray(trans.Errors)) continue;
-    trans.Errors = (trans.Errors as Record<string, unknown>[]).map((e) =>
-      e.ErrorType === "NoMatchingError" ? { ...e, ErrorType: "NoMatchingCondition" } : e
-    );
+    if (!trans) continue;
+    if (!Array.isArray(trans.Errors)) trans.Errors = [];
+    
+    // 1. Enforce correct default error type
+    trans.Errors = (trans.Errors as Record<string, unknown>[]).map((e) => {
+      if (action.Type === "Compare" && e.ErrorType === "NoMatchingError") {
+        return { ...e, ErrorType: "NoMatchingCondition" };
+      }
+      if (action.Type !== "Compare" && action.Type !== "ConnectParticipantWithLexBot" && e.ErrorType === "NoMatchingCondition") {
+        return { ...e, ErrorType: "NoMatchingError" };
+      }
+      return e;
+    });
+
+    // 2. Deduplicate error types (Connect rejects multiple branches with the same ErrorType)
+    const seenErrors = new Set<string>();
+    trans.Errors = (trans.Errors as Record<string, unknown>[]).filter((e) => {
+      const errType = e.ErrorType as string;
+      if (seenErrors.has(errType)) return false;
+      seenErrors.add(errType);
+      return true;
+    });
+
+    // 3. Ensure Compare block has NoMatchingCondition
+    if (action.Type === "Compare" && !seenErrors.has("NoMatchingCondition")) {
+      (trans.Errors as Record<string, unknown>[]).push({
+        NextAction: trans.NextAction ?? action.Identifier,
+        ErrorType: "NoMatchingCondition"
+      });
+    }
+
+    // 4. Ensure Lex Bot block has BOTH NoMatchingCondition and NoMatchingError
+    if (action.Type === "ConnectParticipantWithLexBot") {
+      if (!seenErrors.has("NoMatchingCondition")) {
+        (trans.Errors as Record<string, unknown>[]).push({
+          NextAction: trans.NextAction ?? action.Identifier,
+          ErrorType: "NoMatchingCondition"
+        });
+      }
+      if (!seenErrors.has("NoMatchingError")) {
+        (trans.Errors as Record<string, unknown>[]).push({
+          NextAction: trans.NextAction ?? action.Identifier,
+          ErrorType: "NoMatchingError"
+        });
+      }
+    }
   }
+
+  // Inject Metadata. Connect UI imports auto-generate this, but Connect API requires it
+  // or it will throw an InvalidContactFlowException: UnknownError.
+  const actionMetadata: Record<string, unknown> = {};
+  actions.forEach((action, index) => {
+    if (action.Identifier) {
+      actionMetadata[action.Identifier as string] = {
+        Position: { X: (index % 5) * 200, Y: Math.floor(index / 5) * 150 },
+      };
+    }
+  });
+
+  parsed.Metadata = {
+    ActionMetadata: actionMetadata,
+  };
 
   return JSON.stringify(parsed);
 }

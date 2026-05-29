@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { ReactFlow, MiniMap, Controls, Background, Handle, Position, type Node } from "@xyflow/react";
+import { useEffect, useMemo } from "react";
+import { ReactFlow, MiniMap, Controls, Background, Handle, Position, useNodesState, useEdgesState, type Node, type Edge } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { flowJsonToGraph } from "@/lib/flow/flowVisualizer";
 
@@ -54,6 +54,19 @@ export function FlowCanvas({ flowJson }: FlowCanvasProps) {
     }
   }, [flowJson]);
 
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  useEffect(() => {
+    if (graph) {
+      setNodes(graph.nodes as Node[]);
+      setEdges(graph.edges);
+    } else {
+      setNodes([]);
+      setEdges([]);
+    }
+  }, [graph, setNodes, setEdges]);
+
   if (!flowJson || !graph) {
     return (
       <div className="h-[600px] bg-gray-50 border border-gray-200 rounded-lg flex items-center justify-center">
@@ -65,13 +78,12 @@ export function FlowCanvas({ flowJson }: FlowCanvasProps) {
   return (
     <div style={{ height: 600 }} className="border border-gray-200 rounded-lg overflow-hidden">
       <ReactFlow
-        nodes={graph.nodes as Node[]}
-        edges={graph.edges}
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
         fitView
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={false}
       >
         <MiniMap />
         <Controls />

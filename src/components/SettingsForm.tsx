@@ -5,10 +5,9 @@ import { Search, Loader2 } from "lucide-react";
 import { addLog } from "@/store/logStore";
 
 const FLOW_ASSISTANT_MODEL_OPTIONS = [
-  { value: "us.amazon.nova-pro-v1:0", label: "Nova Pro (Recommended for flow generation)" },
-  { value: "us.anthropic.claude-sonnet-4-6-20250514-v1:0", label: "Claude Sonnet 4.6" },
-  { value: "us.anthropic.claude-opus-4-7-20250514-v1:0", label: "Claude Opus 4.7 (Best quality)" },
+  { value: "us.amazon.nova-pro-v1:0", label: "Amazon Nova Pro (Recommended)" },
   { value: "us.anthropic.claude-haiku-4-5-20251001-v1:0", label: "Claude Haiku 4.5 (Economy)" },
+  { value: "us.anthropic.claude-sonnet-4-5-20251001-v1:0", label: "Claude Sonnet 4.5" },
 ];
 
 export function SettingsForm() {
@@ -24,6 +23,9 @@ export function SettingsForm() {
   const [fetchingLexBots, setFetchingLexBots] = useState(false);
   const [lexBotOptions, setLexBotOptions] = useState<Array<{ aliasArn: string; label: string }>>([]);
   const [lexBotError, setLexBotError] = useState<string | null>(null);
+
+  const [testingModel, setTestingModel] = useState(false);
+  const [modelTestResult, setModelTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -112,6 +114,29 @@ export function SettingsForm() {
       alert("Failed: " + msg);
     } finally {
       setDerivingUrl(false);
+    }
+  };
+
+  const handleTestModel = async () => {
+    const { flowAssistantModelId, connectRegion } = projectConfig.aws;
+    if (!flowAssistantModelId || !connectRegion) {
+      setModelTestResult({ ok: false, error: "Set Connect Region and Flow Assistant Model first." });
+      return;
+    }
+    setTestingModel(true);
+    setModelTestResult(null);
+    try {
+      const res = await fetch("/api/aws/bedrock/test-model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId: flowAssistantModelId, region: connectRegion }),
+      });
+      const data = await res.json();
+      setModelTestResult(data);
+    } catch {
+      setModelTestResult({ ok: false, error: "Request failed — check network or server." });
+    } finally {
+      setTestingModel(false);
     }
   };
 
@@ -361,7 +386,17 @@ export function SettingsForm() {
           </div>
 
           <div className="col-span-1 md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Flow Assistant Model</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium text-gray-700">Flow Assistant Model</label>
+              <button
+                onClick={handleTestModel}
+                disabled={testingModel || !projectConfig.aws.flowAssistantModelId || !projectConfig.aws.connectRegion}
+                className="text-sm flex items-center gap-1 text-blue-600 hover:text-blue-800 disabled:opacity-50 transition-colors"
+              >
+                {testingModel ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {testingModel ? "Testing..." : "Test model"}
+              </button>
+            </div>
             <select
               className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm mb-2"
               value={FLOW_ASSISTANT_MODEL_OPTIONS.some(o => o.value === projectConfig.aws.flowAssistantModelId) ? projectConfig.aws.flowAssistantModelId : "__custom__"}
@@ -370,6 +405,7 @@ export function SettingsForm() {
                   updateProjectConfig({ aws: { ...projectConfig.aws, flowAssistantModelId: e.target.value } });
                   setCustomModelId("");
                 }
+                setModelTestResult(null);
               }}
             >
               {FLOW_ASSISTANT_MODEL_OPTIONS.map((o) => (
@@ -380,16 +416,25 @@ export function SettingsForm() {
             {(!FLOW_ASSISTANT_MODEL_OPTIONS.some(o => o.value === projectConfig.aws.flowAssistantModelId) || customModelId) && (
               <input
                 type="text"
-                className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                placeholder="Enter custom cross-region inference profile ID"
+                className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm mb-2"
+                placeholder="e.g. us.anthropic.claude-sonnet-4-5-20251001-v1:0"
                 value={customModelId || (!FLOW_ASSISTANT_MODEL_OPTIONS.some(o => o.value === projectConfig.aws.flowAssistantModelId) ? projectConfig.aws.flowAssistantModelId : "")}
                 onChange={(e) => {
                   setCustomModelId(e.target.value);
                   updateProjectConfig({ aws: { ...projectConfig.aws, flowAssistantModelId: e.target.value } });
+                  setModelTestResult(null);
                 }}
               />
             )}
-            <p className="text-xs text-gray-400 mt-1">Cross-region inference profile IDs. Verify availability in the Bedrock console.</p>
+            {modelTestResult && (
+              <div className={`flex items-start gap-2 mt-2 text-sm rounded-md px-3 py-2 ${modelTestResult.ok ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
+                <span>{modelTestResult.ok ? "✓" : "✗"}</span>
+                <span>{modelTestResult.ok ? "Model is reachable and working." : (modelTestResult.error ?? "Unknown error")}</span>
+              </div>
+            )}
+            <p className="text-xs text-gray-400 mt-1">
+              Cross-region inference profile IDs (us.* prefix for us-west-2). Click <strong>Test model</strong> to verify before generating flows.
+            </p>
           </div>
         </div>
       </div>
