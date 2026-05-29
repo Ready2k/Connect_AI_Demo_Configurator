@@ -50,7 +50,7 @@ const defaultJourney: JourneyConfig = {
 
 export default function ExperiencePage() {
   const { projectConfig } = useProjectStore();
-  const { experiences, activeExperienceId, addExperience, updateExperience, setActiveExperience, getActiveExperience } =
+  const { experiences, activeExperienceId, addExperience, updateExperience, removeExperience, setActiveExperience, getActiveExperience } =
     useExperienceStore();
   const { library } = useSchemaStore();
   const addLog = useLogStore((s) => s.addLog);
@@ -66,6 +66,7 @@ export default function ExperiencePage() {
   const [voiceTestOpen, setVoiceTestOpen] = useState(false);
   const [chatTestOpen, setChatTestOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [deletingExperience, setDeletingExperience] = useState(false);
   const [publishResult, setPublishResult] = useState<{ flowId: string; flowArn?: string; updated: boolean } | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishSentContent, setPublishSentContent] = useState<string | null>(null);
@@ -491,6 +492,57 @@ export default function ExperiencePage() {
     }
   };
 
+  const handleDeleteExperience = async () => {
+    if (!activeExperience || !activeExperienceId) return;
+    
+    const confirmDelete = window.confirm(
+      `Are you sure you want to delete the experience "${activeExperience.name}"?\n\nIf published, this will delete the contact flow in Amazon Connect, but will NOT delete the Q Connect AI Agent.`
+    );
+    if (!confirmDelete) return;
+
+    setDeletingExperience(true);
+    addLog("INFO", "ExperiencePage", `Starting removal of experience: ${activeExperience.name}`);
+    try {
+      const { connectRegion, connectInstanceId } = projectConfig.aws;
+      
+      // Look up deployed flow by name
+      const flowMatch = flows.find(f => f.name === activeExperience.name);
+      if (flowMatch && connectRegion && connectInstanceId) {
+        addLog("INFO", "ExperiencePage", `Found matching AWS Contact Flow "${flowMatch.name}" (ID: ${flowMatch.id}). Deleting from AWS Connect...`);
+        
+        const res = await fetch(`/api/aws/connect/flows/${flowMatch.id}?region=${encodeURIComponent(connectRegion)}&connectInstanceId=${encodeURIComponent(connectInstanceId)}`, {
+          method: "DELETE"
+        });
+        const data = await res.json();
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        addLog("SUCCESS", "ExperiencePage", `Successfully deleted Contact Flow from AWS Connect.`);
+      } else {
+        addLog("INFO", "ExperiencePage", `No deployed contact flow found in AWS Connect with name "${activeExperience.name}". Removing locally only.`);
+      }
+
+      // Remove locally
+      removeExperience(activeExperienceId);
+      addLog("SUCCESS", "ExperiencePage", `Successfully removed experience locally.`);
+      
+      // Refresh flows list
+      if (connectRegion && connectInstanceId) {
+        const flowsRes = await fetch(
+          `/api/aws/connect/flows?region=${encodeURIComponent(connectRegion || "")}&connectInstanceId=${encodeURIComponent(connectInstanceId || "")}`
+        );
+        const flowsData = await flowsRes.json();
+        if (flowsData.flows) setFlows(flowsData.flows);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to delete experience";
+      addLog("ERROR", "ExperiencePage", `Error deleting experience: ${msg}`);
+      alert(`Error during deletion: ${msg}\n\nThe experience will not be deleted until the error is resolved or you are offline.`);
+    } finally {
+      setDeletingExperience(false);
+    }
+  };
+
   const handleExportJson = () => {
     if (!activeExperience?.generatedFlowJson) return;
     const blob = new Blob([activeExperience.generatedFlowJson], { type: "application/json" });
@@ -559,6 +611,15 @@ export default function ExperiencePage() {
         >
           New Experience
         </button>
+        {mounted && activeExperienceId && (
+          <button
+            onClick={handleDeleteExperience}
+            disabled={deletingExperience}
+            className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-md hover:bg-red-100 disabled:opacity-50 transition-colors text-sm font-medium"
+          >
+            {deletingExperience ? "Deleting..." : "Delete Experience"}
+          </button>
+        )}
       </div>
 
       {!mounted || !activeExperience ? (

@@ -10,6 +10,11 @@ export const deploymentModeSchema = z.enum([
 ]);
 
 export const demoFailureModeSchema = z.enum([
+  "immediate_failure",
+  "lookup_stage_failure",
+  "action_stage_failure",
+  "fulfillment_stage_failure",
+  "full_success_simulation",
   "tool_failure_at_list_cards",
   "tool_failure_at_block_card",
   "tool_failure_at_replacement",

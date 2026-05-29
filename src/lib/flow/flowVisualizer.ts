@@ -142,7 +142,7 @@ export function flowJsonToGraph(flowJson: string): { nodes: Node[]; edges: Edge[
     if (!t) continue;
     if (t.NextAction) {
       edges.push({
-        id: `${action.Identifier}->${t.NextAction}`,
+        id: `${action.Identifier}->next->${t.NextAction}`,
         source: action.Identifier,
         target: t.NextAction,
         sourceHandle: "source",
@@ -153,7 +153,7 @@ export function flowJsonToGraph(flowJson: string): { nodes: Node[]; edges: Edge[
     (t.Errors ?? []).forEach((err, idx) => {
       if (err.NextAction) {
         edges.push({
-          id: `${action.Identifier}->err->${err.ErrorType ?? `error-${idx}`}->${err.NextAction}`,
+          id: `${action.Identifier}->err:${err.ErrorType ?? "unknown"}:${idx}->${err.NextAction}`,
           source: action.Identifier,
           target: err.NextAction,
           sourceHandle: "source",
@@ -164,9 +164,9 @@ export function flowJsonToGraph(flowJson: string): { nodes: Node[]; edges: Edge[
     });
     (t.Conditions ?? []).forEach((cond, idx) => {
       if (cond.NextAction) {
-        const condLabel = (cond.Condition as any)?.Operands?.[0] as string || `cond-${idx}`;
+        const condLabel = (cond.Condition as any)?.Operands?.[0] as string || `cond`;
         edges.push({
-          id: `${action.Identifier}->cond->${condLabel}->${cond.NextAction}`,
+          id: `${action.Identifier}->cond:${condLabel}:${idx}->${cond.NextAction}`,
           source: action.Identifier,
           target: cond.NextAction,
           sourceHandle: "source",

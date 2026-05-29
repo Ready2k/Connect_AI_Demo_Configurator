@@ -7,6 +7,11 @@ export type DeploymentMode =
   | "create_prompts_and_agents";
 
 export type DemoFailureMode =
+  | "immediate_failure"
+  | "lookup_stage_failure"
+  | "action_stage_failure"
+  | "fulfillment_stage_failure"
+  | "full_success_simulation"
   | "tool_failure_at_list_cards"
   | "tool_failure_at_block_card"
   | "tool_failure_at_replacement"
@@ -43,6 +48,7 @@ export interface AgentToolConfig {
   namespace?: string;
   permissions?: "Sufficient" | "Insufficient";
   toolId?: string;
+  inputSchema?: Record<string, any>;
 }
 
 export interface AgentPromptConfig {

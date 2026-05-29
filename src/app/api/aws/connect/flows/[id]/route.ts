@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getConnectClient, describeContactFlow } from "@/lib/aws/connectClient";
+import { getConnectClient, describeContactFlow, deleteContactFlow } from "@/lib/aws/connectClient";
 
 export async function GET(
   req: NextRequest,
@@ -35,6 +35,33 @@ export async function GET(
     });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "Failed to describe contact flow";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const { searchParams } = new URL(req.url);
+    const region = searchParams.get("region");
+    const connectInstanceId = searchParams.get("connectInstanceId");
+
+    if (!region || !connectInstanceId) {
+      return NextResponse.json({ error: "Missing region or connectInstanceId" }, { status: 400 });
+    }
+
+    const client = getConnectClient(region);
+    await deleteContactFlow(client, {
+      InstanceId: connectInstanceId,
+      ContactFlowId: id,
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Failed to delete contact flow";
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

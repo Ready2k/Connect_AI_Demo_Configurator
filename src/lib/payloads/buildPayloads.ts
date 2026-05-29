@@ -49,7 +49,7 @@ export function buildPayloads(config: ProjectConfig, timestamp: number = Date.no
                 toolName: t.name,
                 toolType: "RETURN_TO_CONTROL",
                 description: t.description,
-                inputSchema: { type: "object", properties: {} },
+                inputSchema: t.inputSchema || { type: "object", properties: {} },
               };
             } else {
               return {

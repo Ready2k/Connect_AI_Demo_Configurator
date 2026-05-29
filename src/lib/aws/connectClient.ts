@@ -22,6 +22,8 @@ import {
   UpdateContactFlowContentCommandInput,
   ListBotsCommand,
   ListBotsCommandInput,
+  DeleteContactFlowCommand,
+  DeleteContactFlowCommandInput,
 } from "@aws-sdk/client-connect";
 
 export function getConnectClient(region: string) {
@@ -80,5 +82,10 @@ export async function updateContactFlowContent(client: ConnectClient, input: Upd
 
 export async function listLexV2Bots(client: ConnectClient, input: ListBotsCommandInput) {
   const command = new ListBotsCommand(input);
+  return await client.send(command);
+}
+
+export async function deleteContactFlow(client: ConnectClient, input: DeleteContactFlowCommandInput) {
+  const command = new DeleteContactFlowCommand(input);
   return await client.send(command);
 }

@@ -76,5 +76,5 @@ export const defaultProjectConfig: ProjectConfig = {
     project: "connect-demo",
     environment: "dev",
   },
-  demoFailureMode: "tool_failure_at_block_card",
+  demoFailureMode: "action_stage_failure",
 };

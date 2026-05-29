@@ -30,7 +30,13 @@ const MOCK_SECURITY_PROFILES = [
 ];
 
 export function AgentConfigCard({ config, onChange, onRemove, onClose, aws }: AgentConfigCardProps) {
-  const [activeTab, setActiveTab] = useState<"config" | "test">("config");
+    const [activeTab, setActiveTab] = useState<"config" | "test">("config");
+
+  const [selectedToolIndex, setSelectedToolIndex] = useState<number | null>(null);
+  const [editingToolIndex, setEditingToolIndex] = useState<number | null>(null);
+  const [editingTool, setEditingTool] = useState<AgentToolConfig | null>(null);
+  const [toolSchemaText, setToolSchemaText] = useState<string>("");
+  const [schemaError, setSchemaError] = useState<string | null>(null);
 
   const handleSaveDraft = () => {
     onChange({ ...config, visibilityStatus: "SAVED" });
@@ -42,15 +48,67 @@ export function AgentConfigCard({ config, onChange, onRemove, onClose, aws }: Ag
     onClose();
   };
 
-  const addTool = () => {
-    const newTool: AgentToolConfig = {
+  const handleAddTool = () => {
+    setEditingToolIndex(null);
+    setEditingTool({
       name: `NewTool_${(config.tools?.length || 0) + 1}`,
       toolType: "RETURN_TO_CONTROL",
-      description: "Description of tool",
-      permissions: "Sufficient"
-    };
-    onChange({ ...config, tools: [...(config.tools || []), newTool] });
+      description: "",
+      permissions: "Sufficient",
+      inputSchema: { type: "object", properties: {} },
+    });
+    setToolSchemaText(JSON.stringify({ type: "object", properties: {} }, null, 2));
+    setSchemaError(null);
   };
+
+  const handleEditTool = () => {
+    if (selectedToolIndex === null || !config.tools) return;
+    const tool = config.tools[selectedToolIndex];
+    setEditingToolIndex(selectedToolIndex);
+    setEditingTool({ ...tool });
+    setToolSchemaText(tool.inputSchema ? JSON.stringify(tool.inputSchema, null, 2) : JSON.stringify({ type: "object", properties: {} }, null, 2));
+    setSchemaError(null);
+  };
+
+  const handleRemoveTool = () => {
+    if (selectedToolIndex === null || !config.tools) return;
+    const newTools = [...config.tools];
+    newTools.splice(selectedToolIndex, 1);
+    onChange({ ...config, tools: newTools });
+    setSelectedToolIndex(null);
+  };
+
+  const handleSaveTool = () => {
+    if (!editingTool) return;
+    let schemaObj = undefined;
+    if (editingTool.toolType === "RETURN_TO_CONTROL" && toolSchemaText.trim()) {
+      try {
+        schemaObj = JSON.parse(toolSchemaText);
+        if (typeof schemaObj !== "object" || schemaObj === null || Array.isArray(schemaObj)) {
+          setSchemaError("Schema must be a JSON object.");
+          return;
+        }
+      } catch (e) {
+        setSchemaError("Invalid JSON schema.");
+        return;
+      }
+    }
+
+    const toolToSave = { ...editingTool, inputSchema: schemaObj };
+    const newTools = [...(config.tools || [])];
+    
+    if (editingToolIndex !== null) {
+      newTools[editingToolIndex] = toolToSave;
+    } else {
+      newTools.push(toolToSave);
+    }
+    
+    onChange({ ...config, tools: newTools });
+    setEditingTool(null);
+    setEditingToolIndex(null);
+  };
+
+
 
   return (
     <div className="bg-gray-50 flex flex-col h-full rounded-lg border border-gray-200 overflow-hidden shadow-sm">
@@ -234,9 +292,9 @@ export function AgentConfigCard({ config, onChange, onRemove, onClose, aws }: Ag
           </div>
 
           <div className="flex gap-2 mb-4">
-            <button className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50" disabled>Remove</button>
-            <button className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50" disabled>Edit</button>
-            <button onClick={addTool} className="px-3 py-1.5 text-sm font-medium text-blue-600 bg-white border border-gray-300 rounded hover:bg-gray-50">Add tool</button>
+            <button onClick={handleRemoveTool} disabled={selectedToolIndex === null} className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">Remove</button>
+            <button onClick={handleEditTool} disabled={selectedToolIndex === null} className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">Edit</button>
+            <button onClick={handleAddTool} className="px-3 py-1.5 text-sm font-medium text-blue-600 bg-white border border-gray-300 rounded hover:bg-gray-50">Add tool</button>
           </div>
 
           <div className="overflow-x-auto border border-gray-200 rounded">
@@ -252,8 +310,10 @@ export function AgentConfigCard({ config, onChange, onRemove, onClose, aws }: Ag
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {(config.tools || []).map((tool, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 whitespace-nowrap"><input type="radio" name="tool_select" className="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300" /></td>
+                  <tr key={idx} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedToolIndex(idx)}>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <input type="radio" name="tool_select" checked={selectedToolIndex === idx} onChange={() => setSelectedToolIndex(idx)} className="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300" />
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-blue-600">{tool.name}</td>
                     <td className="px-4 py-3 text-sm text-gray-500 max-w-xs truncate" title={tool.description}>{tool.description || "-"}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{tool.namespace || "-"}</td>
@@ -376,8 +436,65 @@ export function AgentConfigCard({ config, onChange, onRemove, onClose, aws }: Ag
             Delete Agent
           </button>
         </div>
+
+        {/* Tool Modal */}
+        {editingTool && (
+          <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h3 className="text-lg font-bold text-gray-900">{editingToolIndex !== null ? "Edit Tool" : "Add Tool"}</h3>
+              </div>
+              <div className="p-6 overflow-y-auto space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                  <input type="text" value={editingTool.name} onChange={e => setEditingTool({...editingTool, name: e.target.value})} className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tool Type</label>
+                  <select value={editingTool.toolType} onChange={e => setEditingTool({...editingTool, toolType: e.target.value as any})} className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    <option value="RETURN_TO_CONTROL">RETURN_TO_CONTROL</option>
+                    <option value="MODEL_CONTEXT_PROTOCOL">MODEL_CONTEXT_PROTOCOL</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <textarea value={editingTool.description || ""} onChange={e => setEditingTool({...editingTool, description: e.target.value})} rows={3} className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+                </div>
+                {editingTool.toolType === "MODEL_CONTEXT_PROTOCOL" && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tool ID <span className="text-red-500">*</span></label>
+                    <input type="text" value={editingTool.toolId || ""} onChange={e => setEditingTool({...editingTool, toolId: e.target.value})} className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="e.g. aws_service__qconnect_..." />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Namespace</label>
+                  <input type="text" value={editingTool.namespace || ""} onChange={e => setEditingTool({...editingTool, namespace: e.target.value})} className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 sm:text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Permissions</label>
+                  <select value={editingTool.permissions || "Sufficient"} onChange={e => setEditingTool({...editingTool, permissions: e.target.value as any})} className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    <option value="Sufficient">Sufficient</option>
+                    <option value="Insufficient">Insufficient</option>
+                  </select>
+                </div>
+                {editingTool.toolType === "RETURN_TO_CONTROL" && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Input Schema (JSON)</label>
+                    <textarea value={toolSchemaText} onChange={e => {setToolSchemaText(e.target.value); setSchemaError(null);}} rows={4} className="w-full p-2 border border-gray-300 rounded-md font-mono text-xs focus:ring-blue-500 focus:border-blue-500" />
+                    {schemaError && <p className="mt-1 text-sm text-red-600">{schemaError}</p>}
+                  </div>
+                )}
+              </div>
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 bg-gray-50">
+                <button onClick={() => setEditingTool(null)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                <button onClick={handleSaveTool} disabled={editingTool.toolType === "MODEL_CONTEXT_PROTOCOL" && !editingTool.toolId?.trim()} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50">Save</button>
+              </div>
+            </div>
           </div>
         )}
+          </div>
+        )}
+
 
         {activeTab === "test" && (
           <div className="h-full flex flex-col">

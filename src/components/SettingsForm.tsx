@@ -4,12 +4,6 @@ import { useEffect, useState } from "react";
 import { Search, Loader2 } from "lucide-react";
 import { addLog } from "@/store/logStore";
 
-const FLOW_ASSISTANT_MODEL_OPTIONS = [
-  { value: "us.amazon.nova-pro-v1:0", label: "Amazon Nova Pro (Recommended)" },
-  { value: "us.anthropic.claude-haiku-4-5-20251001-v1:0", label: "Claude Haiku 4.5 (Economy)" },
-  { value: "us.anthropic.claude-sonnet-4-5-20251001-v1:0", label: "Claude Sonnet 4.5" },
-];
-
 export function SettingsForm() {
   const { projectConfig, updateProjectConfig } = useProjectStore();
   const [mounted, setMounted] = useState(false);
@@ -19,7 +13,6 @@ export function SettingsForm() {
   const [fetchingModels, setFetchingModels] = useState(false);
   const [modelsData, setModelsData] = useState<{ models: any[], warning?: string } | null>(null);
   const [derivingUrl, setDerivingUrl] = useState(false);
-  const [customModelId, setCustomModelId] = useState("");
   const [fetchingLexBots, setFetchingLexBots] = useState(false);
   const [lexBotOptions, setLexBotOptions] = useState<Array<{ aliasArn: string; label: string }>>([]);
   const [lexBotError, setLexBotError] = useState<string | null>(null);
@@ -397,35 +390,33 @@ export function SettingsForm() {
                 {testingModel ? "Testing..." : "Test model"}
               </button>
             </div>
-            <select
-              className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm mb-2"
-              value={FLOW_ASSISTANT_MODEL_OPTIONS.some(o => o.value === projectConfig.aws.flowAssistantModelId) ? projectConfig.aws.flowAssistantModelId : "__custom__"}
-              onChange={(e) => {
-                if (e.target.value !== "__custom__") {
-                  updateProjectConfig({ aws: { ...projectConfig.aws, flowAssistantModelId: e.target.value } });
-                  setCustomModelId("");
-                }
-                setModelTestResult(null);
-              }}
-            >
-              {FLOW_ASSISTANT_MODEL_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label} — {o.value}</option>
-              ))}
-              <option value="__custom__">Custom model ID...</option>
-            </select>
-            {(!FLOW_ASSISTANT_MODEL_OPTIONS.some(o => o.value === projectConfig.aws.flowAssistantModelId) || customModelId) && (
-              <input
-                type="text"
+            {modelsData && modelsData.models.length > 0 ? (
+              <select
                 className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm mb-2"
-                placeholder="e.g. us.anthropic.claude-sonnet-4-5-20251001-v1:0"
-                value={customModelId || (!FLOW_ASSISTANT_MODEL_OPTIONS.some(o => o.value === projectConfig.aws.flowAssistantModelId) ? projectConfig.aws.flowAssistantModelId : "")}
+                value={projectConfig.aws.flowAssistantModelId || ""}
                 onChange={(e) => {
-                  setCustomModelId(e.target.value);
                   updateProjectConfig({ aws: { ...projectConfig.aws, flowAssistantModelId: e.target.value } });
                   setModelTestResult(null);
                 }}
-              />
-            )}
+              >
+                <option value="">-- Select a Flow Assistant Model --</option>
+                {modelsData.models.map((m: any) => (
+                  <option key={m.modelId} value={m.modelId}>
+                    {m.displayName || m.modelId} ({m.modelId})
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            <input 
+              type="text" 
+              placeholder="Or enter Flow Assistant Model ID manually"
+              className="block w-full rounded-md border-gray-300 shadow-sm p-2.5 border focus:border-blue-500 focus:ring-blue-500 sm:text-sm text-gray-500" 
+              value={projectConfig.aws.flowAssistantModelId || ""}
+              onChange={(e) => {
+                updateProjectConfig({ aws: { ...projectConfig.aws, flowAssistantModelId: e.target.value } });
+                setModelTestResult(null);
+              }}
+            />
             {modelTestResult && (
               <div className={`flex items-start gap-2 mt-2 text-sm rounded-md px-3 py-2 ${modelTestResult.ok ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
                 <span>{modelTestResult.ok ? "✓" : "✗"}</span>
@@ -448,10 +439,15 @@ export function SettingsForm() {
             value={projectConfig.demoFailureMode}
             onChange={(e) => updateProjectConfig({ demoFailureMode: e.target.value as any })}
           >
-            <option value="tool_failure_at_list_cards">Tool Failure at List Cards</option>
-            <option value="tool_failure_at_block_card">Tool Failure at Block Card</option>
-            <option value="tool_failure_at_replacement">Tool Failure at Replacement</option>
-            <option value="manual_success_simulation">Manual Success Simulation</option>
+            <option value="full_success_simulation">Generic: Full Success Simulation (Happy Path)</option>
+            <option value="immediate_failure">Generic: Immediate Failure (At Flow Entry)</option>
+            <option value="lookup_stage_failure">Generic: Lookup Phase Failure (e.g. Listing items)</option>
+            <option value="action_stage_failure">Generic: Action Phase Failure (e.g. Performing action)</option>
+            <option value="fulfillment_stage_failure">Generic: Fulfillment Phase Failure (e.g. Ordering delivery)</option>
+            <option value="tool_failure_at_list_cards">Card Demo: Tool Failure at List Cards</option>
+            <option value="tool_failure_at_block_card">Card Demo: Tool Failure at Block Card</option>
+            <option value="tool_failure_at_replacement">Card Demo: Tool Failure at Replacement</option>
+            <option value="manual_success_simulation">Card Demo: Manual Success Simulation</option>
           </select>
           <p className="text-sm text-gray-500 mt-2">Determines at what point the mock tools will simulate a failure and route to the human queue.</p>
         </div>
