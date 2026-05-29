@@ -133,8 +133,13 @@ Block 3 — CreateWisdomSession (initialise Q Connect — the AI agent is config
   Transitions: { "NextAction": "<block4>", "Errors": [{ "NextAction": "<fallback_message>", "ErrorType": "NoMatchingError" }] }
 
 Block 4 — UpdateContactAttributes (link the Q Connect session to the contact):
-  Parameters: { "WisdomSessionArn": "$.Wisdom.SessionArn", "TargetContact": "Current" }
-  Transitions: { "NextAction": "<block5>", "Errors": [{ "NextAction": "<fallback_message>", "ErrorType": "NoMatchingError" }] }
+  Parameters: {
+    "Attributes": {
+      "x-amz-lex:q-in-connect:session-arn": "$.Wisdom.SessionArn"
+    },
+    "TargetContact": "Current"
+  }
+  Transitions: { "NextAction": "<block5>", "Errors": [{ "NextAction": "<fallback_transfer>", "ErrorType": "NoMatchingError" }] }
 
 Block 5 — ConnectParticipantWithLexBot (invoke the Q Connect AI agent via the Lex bot):
   *** THIS IS THE BLOCK THAT RUNS THE AI AGENT CONVERSATION ***
