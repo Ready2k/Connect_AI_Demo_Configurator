@@ -267,14 +267,20 @@ function normalizeFlowContent(flowJson: string): string {
       // Intentionally preserving all AI agent configurations if present
     }
 
-    // UpdateContactAttributes: remove wisdomSessionArn if its value is a dynamic reference —
-    // $.Wisdom.SessionArn is not valid as a static attribute value and causes InvalidContactFlowException
+    // UpdateContactAttributes: ensure the Q in Connect session ARN uses the correct attribute key
     if (action.Type === "UpdateContactAttributes") {
       const params = action.Parameters as Record<string, unknown> | undefined;
       const attrs = params?.Attributes as Record<string, unknown> | undefined;
       if (attrs) {
+        // LLM may hallucinate "wisdomSessionArn" — rename to the correct Lex session attribute key
         if (attrs.wisdomSessionArn === "$.Wisdom.SessionArn") {
           delete attrs.wisdomSessionArn;
+          attrs["x-amz-lex:q-in-connect:session-arn"] = "$.Wisdom.SessionArn";
+        }
+        // Also catch "WisdomSessionArn" (PascalCase variant)
+        if ((attrs as any).WisdomSessionArn === "$.Wisdom.SessionArn") {
+          delete (attrs as any).WisdomSessionArn;
+          attrs["x-amz-lex:q-in-connect:session-arn"] = "$.Wisdom.SessionArn";
         }
         // Connect API rejects empty Attributes object
         if (Object.keys(attrs).length === 0) {
@@ -403,6 +409,51 @@ function normalizeFlowContent(flowJson: string): string {
           });
         }
       }
+    }
+  }
+
+  // Post-normalization guard: ensure Q in Connect session ARN is linked before Lex bot
+  const hasWisdom = actions.some((a) => a.Type === "CreateWisdomSession");
+  const lexAction = actions.find((a) => a.Type === "ConnectParticipantWithLexBot");
+  if (hasWisdom && lexAction) {
+    // Check if any UpdateContactAttributes block sets x-amz-lex:q-in-connect:session-arn
+    const hasSessionArnAttr = actions.some((a) => {
+      if (a.Type !== "UpdateContactAttributes") return false;
+      const attrs = (a.Parameters as Record<string, unknown> | undefined)?.Attributes as Record<string, unknown> | undefined;
+      return attrs && "x-amz-lex:q-in-connect:session-arn" in attrs;
+    });
+
+    if (!hasSessionArnAttr) {
+      // Find the action that transitions INTO the Lex block
+      const lexId = lexAction.Identifier as string;
+      const predecessorIdx = actions.findIndex((a) => {
+        const t = a.Transitions as Record<string, unknown> | undefined;
+        return t && t.NextAction === lexId;
+      });
+
+      // Build a new UpdateContactAttributes block to inject
+      const injectedId = `b0000001-0000-0000-0000-${String(actions.length + 1).padStart(12, "0")}`;
+      const injectedBlock: ActionObj = {
+        Identifier: injectedId,
+        Type: "UpdateContactAttributes",
+        Parameters: {
+          Attributes: {
+            "x-amz-lex:q-in-connect:session-arn": "$.Wisdom.SessionArn"
+          },
+          TargetContact: "Current"
+        },
+        Transitions: {
+          NextAction: lexId,
+          Errors: [{ NextAction: lexId, ErrorType: "NoMatchingError" }]
+        }
+      };
+
+      // Rewire: predecessor → injected block → Lex block
+      if (predecessorIdx >= 0) {
+        const predTrans = actions[predecessorIdx].Transitions as Record<string, unknown>;
+        predTrans.NextAction = injectedId;
+      }
+      actions.push(injectedBlock);
     }
   }
 
