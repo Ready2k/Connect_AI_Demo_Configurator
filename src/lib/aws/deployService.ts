@@ -1,4 +1,5 @@
 import { ProjectConfig, DeploymentManifest, DeployedPrompt, DeployedAgent } from "@/types/project";
+import { QConnectClient, AIPromptSummary, AIAgentSummary, Origin } from "@aws-sdk/client-qconnect";
 import { buildPayloads } from "../payloads/buildPayloads";
 import {
   getQConnectClient,
@@ -18,22 +19,22 @@ export interface DeployProgressEvent {
 }
 export type DeployProgressCallback = (event: DeployProgressEvent) => void;
 
-async function fetchAllPrompts(client: any, assistantId: string) {
+async function fetchAllPrompts(client: QConnectClient, assistantId: string) {
   let nextToken: string | undefined;
-  let allPrompts: any[] = [];
+  let allPrompts: AIPromptSummary[] = [];
   do {
-    const res = await listAiPrompts(client, { assistantId, nextToken, maxResults: 100, origin: "CUSTOMER" as any });
+    const res = await listAiPrompts(client, { assistantId, nextToken, maxResults: 100, origin: "CUSTOMER" as Origin });
     if (res.aiPromptSummaries) allPrompts = allPrompts.concat(res.aiPromptSummaries);
     nextToken = res.nextToken;
   } while (nextToken);
   return allPrompts;
 }
 
-async function fetchAllAgents(client: any, assistantId: string) {
+async function fetchAllAgents(client: QConnectClient, assistantId: string) {
   let nextToken: string | undefined;
-  let allAgents: any[] = [];
+  let allAgents: AIAgentSummary[] = [];
   do {
-    const res = await listAiAgents(client, { assistantId, nextToken, maxResults: 100, origin: "CUSTOMER" as any });
+    const res = await listAiAgents(client, { assistantId, nextToken, maxResults: 100, origin: "CUSTOMER" as Origin });
     if (res.aiAgentSummaries) allAgents = allAgents.concat(res.aiAgentSummaries);
     nextToken = res.nextToken;
   } while (nextToken);
@@ -106,9 +107,9 @@ export async function deployProject(
         let promptRes;
         try {
           promptRes = await createAiPrompt(client, p);
-        } catch (err: any) {
-          onProgress?.({ type: "step_error", stepId: `prompt_${i}`, error: err.message });
-          throw new Error(`Failed to create Prompt for '${baseName}': ${err.message}. Payload: ${JSON.stringify(p.templateConfiguration)}`);
+        } catch (e) { const err = e as any;
+          onProgress?.({ type: "step_error", stepId: `prompt_${i}`, error: (err as Error).message });
+          throw new Error(`Failed to create Prompt for '${baseName}': ${(err as Error).message}. Payload: ${JSON.stringify(p.templateConfiguration)}`);
         }
 
         if (!promptRes.aiPrompt?.aiPromptId) {
@@ -122,9 +123,9 @@ export async function deployProject(
             assistantId: aws.assistantId,
             aiPromptId: promptRes.aiPrompt.aiPromptId,
           });
-        } catch (err: any) {
-          onProgress?.({ type: "step_error", stepId: `prompt_${i}`, error: err.message });
-          throw new Error(`Failed to create Prompt Version for '${baseName}': ${err.message}`);
+        } catch (e) { const err = e as any;
+          onProgress?.({ type: "step_error", stepId: `prompt_${i}`, error: (err as Error).message });
+          throw new Error(`Failed to create Prompt Version for '${baseName}': ${(err as Error).message}`);
         }
 
         prompts.push({
@@ -175,8 +176,8 @@ export async function deployProject(
               assistantId: aws.assistantId,
               aiAgentId: agentRes.aiAgent.aiAgentId,
             });
-          } catch (err: any) {
-            throw new Error(`Failed to create Agent Version: ${err.message}`);
+          } catch (e) { const err = e as any;
+            throw new Error(`Failed to create Agent Version: ${(err as Error).message}`);
           }
 
           agents.push({
@@ -190,16 +191,16 @@ export async function deployProject(
 
           onProgress?.({ type: "step_complete", stepId: `agent_${i}` });
 
-        } catch (err: any) {
-          const fullErrorDetails = `Name: ${err.name}, Message: ${err.message}, Fault: ${err.$fault || 'unknown'}`;
+        } catch (e) { const err = e as any;
+          const fullErrorDetails = `Name: ${err.name}, Message: ${(err as Error).message}, Fault: ${err.$fault || 'unknown'}`;
           console.error(`Failed to create Agent for '${baseName}': ${fullErrorDetails}`);
-          onProgress?.({ type: "step_error", stepId: `agent_${i}`, error: err.message });
+          onProgress?.({ type: "step_error", stepId: `agent_${i}`, error: (err as Error).message });
           agents.push({
             id: "deployment_failed",
             arn: "deployment_failed",
             baseName,
             deployedName: baseName,
-            error: `Agent creation blocked by AWS IAM: ${err.message}. Please create this Agent manually in the AWS Console.`,
+            error: `Agent creation blocked by AWS IAM: ${(err as Error).message}. Please create this Agent manually in the AWS Console.`,
           });
         }
       }
@@ -229,7 +230,7 @@ export async function deployProject(
 
     onProgress?.({ type: "step_complete", stepId: "manifest" });
     return { success: true, manifest };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Unknown error occurred during deployment" };
+  } catch (e) { const error = e as any;
+    return { success: false, error: (error as Error).message || "Unknown error occurred during deployment" };
   }
 }

@@ -13,7 +13,6 @@ function buildGenerationSystemPrompt(
   const schemaJson = JSON.stringify(library.schemas, null, 2);
 
   const agentArn = journeyConfig.wisdomAgentArn ?? "REPLACE_WITH_WISDOM_AGENT_ARN";
-  const lexArn   = journeyConfig.lexBotAliasArn  ?? "REPLACE_WITH_LEX_BOT_ALIAS_ARN";
   const fallbackQueueId = journeyConfig.fallbackQueueId || "REPLACE_WITH_FALLBACK_QUEUE_ARN";
 
   // Derive assistant ARN from agent ARN: arn:aws:wisdom:region:account:assistant/assistantId
@@ -24,16 +23,19 @@ function buildGenerationSystemPrompt(
     assistantArn = `${agentArnMatch[1]}:assistant/${agentArnMatch[2]}`;
   }
 
+  // Versioned agent ARN — Connect requires :$LATEST suffix on OrchestrationAIAgentConfiguration
+  const versionedAgentArn = agentArn.endsWith(":$LATEST") ? agentArn : `${agentArn}:$LATEST`;
+
+  // Each "queue" routing rule sets a specific queue then disconnects.
+  // Each "disconnect" or "agent" rule just disconnects.
+  // The queue is set upfront (block 2) so all error paths can safely use DisconnectParticipant.
   const rulesText = journeyConfig.routingRules
     .map((r) => {
-      if (r.action === "agent") {
-        return `   - Condition "${r.condition}": repeat the CreateWisdomSession + UpdateContactAttributes + ConnectParticipantWithLexBot pattern for agent "${r.targetAgentName}"`;
-      }
       if (r.action === "queue") {
         const qId = r.targetQueueId || "REPLACE_WITH_QUEUE_ARN";
-        return `   - Condition "${r.condition}": UpdateContactTargetQueue (QueueId = "${qId}") → TransferContactToQueue`;
+        return `   - Condition "${r.condition}": UpdateContactTargetQueue (QueueId = "${qId}") → DisconnectParticipant (Parameters: {}, Transitions: {})`;
       }
-      return `   - Condition "${r.condition}": DisconnectParticipant`;
+      return `   - Condition "${r.condition}": DisconnectParticipant (Parameters: {}, Transitions: {})`;
     })
     .join("\n");
 
@@ -41,63 +43,76 @@ function buildGenerationSystemPrompt(
 
 STRICT OUTPUT RULES:
 1. Return ONLY valid JSON — no markdown fences, no comments, no prose.
-2. The top-level "Version" field MUST be exactly "2019-10-30". Do not use any other version string.
-3. Use ONLY block Type values that appear in DISCOVERED BLOCK SCHEMAS below.
-4. Use sequential identifiers: "b0000001-0000-0000-0000-000000000001", "b0000001-0000-0000-0000-000000000002", etc.
-5. Do NOT invent template variables like \${region} or \${account}. Use the literal ARN/ID strings provided below.
+2. The top-level "Version" field MUST be exactly "2019-10-30".
+3. Use sequential identifiers: "b0000001-0000-0000-0000-000000000001", "b0000001-0000-0000-0000-000000000002", etc.
+4. Every action MUST have all four keys: "Parameters" (use {} if none), "Identifier", "Type", "Transitions".
+5. Do NOT invent template variables. Use the literal ARN/ID strings provided below.
+6. Do NOT use TransferContactToQueue or ConnectParticipantWithLexBot — they are not in the required pattern.
 
-RESOURCE VALUES (use these exact strings — do not substitute or template them):
-  Q Connect AI Agent ARN : "${agentArn}"
-  Lex Bot Alias ARN      : "${lexArn}"
-  Fallback Queue ARN/ID  : "${fallbackQueueId}"
+RESOURCE VALUES (use these exact strings):
+  Wisdom Assistant ARN               : "${assistantArn}"
+  Q Connect AI Agent ARN (versioned) : "${versionedAgentArn}"
+  Fallback Queue ARN/ID              : "${fallbackQueueId}"
 
-Q CONNECT INTEGRATION — THREE MANDATORY SEQUENTIAL BLOCKS:
-  Block A — CreateWisdomSession:
-    Parameters.WisdomAssistantArn = "${assistantArn}" (assistant ARN, NOT the AI agent ARN — MUST use WisdomAssistantArn key)
-    Transitions: NextAction → Block B; Errors → fallback handler
+MANDATORY BLOCK SEQUENCE — generate exactly these blocks in this order:
 
-  Block B — UpdateContactAttributes:
-    Parameters.Attributes = { "wisdomSessionArn": "$.Wisdom.SessionArn" }
-    Transitions: NextAction → Block C; Errors → fallback handler
+Block 1 — UpdateFlowLoggingBehavior:
+  Parameters: { "FlowLoggingBehavior": "Enabled" }
+  Transitions: { "NextAction": "<block2>" }
+  *** No Errors array on this block — Connect rejects it ***
 
-  Block C — ConnectParticipantWithLexBot:
-    Parameters.Text = welcome message (the literal text, not a variable)
-    Parameters.LexV2Bot.AliasArn = Lex Bot Alias ARN above
-    Parameters.LexSessionAttributes["x-amz-lex:q-in-connect:ai-agent-arn"] = Q Connect AI Agent ARN above
-    Transitions.NextAction → Compare block
-    Transitions.Errors → fallback handler
-    *** DO NOT add Conditions to ConnectParticipantWithLexBot — all routing belongs in the Compare block ***
+Block 2 — UpdateContactTargetQueue (set fallback queue upfront):
+  Parameters: { "QueueId": "${fallbackQueueId}" }
+  Transitions: { "NextAction": "<block3>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
 
-ROUTING — Compare block:
-  Parameters.ComparisonValue = "$.Lex.SessionAttributes.Tool"
-  Each Condition: { "NextAction": "...", "Condition": { "Operator": "Equals", "Operands": ["VALUE"] } }
-    — Operands contains exactly ONE string (the value to match), NOT the attribute path.
+Block 3 — CreateWisdomSession:
+  Parameters: {
+    "WisdomAssistantArn": "${assistantArn}",
+    "OrchestrationAIAgentConfiguration": {
+      "AgentAssistanceAgentVersionArn": "${versionedAgentArn}"
+    }
+  }
+  Transitions: { "NextAction": "<block4>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
+
+Block 4 — UpdateContactData (store Wisdom session ARN):
+  Parameters: { "WisdomSessionArn": "$.Wisdom.SessionArn" }
+  Transitions: { "NextAction": "<block5>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
+
+Block 5 — UpdateContactAttributes (expose session ARN as contact attribute):
+  Parameters: { "Attributes": { "wisdomSessionArn": "$.Wisdom.SessionArn" }, "TargetContact": "Current" }
+  Transitions: { "NextAction": "<block6>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
+
+Block 6 — MessageParticipant (welcome greeting):
+  Parameters: { "Text": "${journeyConfig.welcomeMessage}", "SkipWhenDTMFBufferEnabled": "false" }
+  Transitions: { "NextAction": "<block7_compare>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
+
+Block 7 — Compare (route on Q Connect agent tool signal):
+  Parameters: { "ComparisonValue": "$.Lex.SessionAttributes.Tool" }
+  Transitions:
+    "NextAction": "<fallback>"
+    "Conditions": [ one entry per routing rule below ]
+    "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingCondition" }]
+
+ROUTING CONDITIONS for the Compare block (each generates one or two blocks after block 7):
 ${rulesText}
-  NoMatchingCondition fallback → UpdateContactTargetQueue (QueueId = "${fallbackQueueId}") → DisconnectParticipant
-  Errors (ErrorType "NoMatchingCondition") → UpdateContactTargetQueue (QueueId = "${fallbackQueueId}") → DisconnectParticipant
+  Default (NextAction, no condition match) → <fallback>
+  Errors (NoMatchingCondition) → <fallback>
 
-TRANSFER PATTERN:
-  Use "UpdateContactTargetQueue" to set the target queue, then "DisconnectParticipant" as the final step.
-  Do NOT use "TransferToFlow" or "TransferContactToQueue" — these are not supported via the API.
+FALLBACK BLOCK (shared by all error paths and the Compare default):
+  Type: DisconnectParticipant, Parameters: {}, Transitions: {}
 
-CRITICAL — ERRORS ON ALL TRANSITIONS:
-  Every block with transitions (except DisconnectParticipant) MUST include an "Errors" array.
-  For Compare blocks: ErrorType must be "NoMatchingCondition" (not "NoMatchingError").
-  For all other blocks: ErrorType must be "NoMatchingError".
-  A missing Errors array will cause InvalidContactFlowException.
+TERMINAL BLOCK RULES:
+  DisconnectParticipant: MUST have Parameters: {} and Transitions: {} — never omit Parameters.
+  UpdateContactTargetQueue before DisconnectParticipant: set QueueId, then next block is DisconnectParticipant.
 
-DISCOVERED BLOCK SCHEMAS (use these exact parameter and transition shapes):
-${schemaJson}
+ERRORS RULES:
+  Every non-terminal block MUST have an Errors array in its Transitions.
+  Compare block errors: ErrorType = "NoMatchingCondition".
+  All other blocks: ErrorType = "NoMatchingError".
+  UpdateFlowLoggingBehavior is the ONLY exception — no Errors array.
 
-TARGET FLOW STRUCTURE:
-1. UpdateFlowLoggingBehavior (Parameters.FlowLoggingBehavior = "Enabled")
-2. CreateWisdomSession (Block A — agent "${journeyConfig.entryAgentName}")
-3. UpdateContactAttributes (Block B — store session ARN)
-4. ConnectParticipantWithLexBot (Block C — welcome: "${journeyConfig.welcomeMessage}")
-5. Compare (routing — checks $.Lex.SessionAttributes.Tool)
-6. For each "queue" rule: UpdateContactTargetQueue → TransferContactToQueue
-7. For each "disconnect" rule: DisconnectParticipant
-8. Fallback/error path: UpdateContactTargetQueue ("${fallbackQueueId}") → TransferContactToQueue`;
+DISCOVERED BLOCK SCHEMAS (reference for parameter/transition shapes):
+${schemaJson}`;
 }
 
 export async function generateFlow(args: {

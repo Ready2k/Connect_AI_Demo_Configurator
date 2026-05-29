@@ -36,6 +36,29 @@ export interface AwsSettings {
   lexBotAliasArn?: string;
 }
 
+export interface AgentToolConfig {
+  name: string;
+  toolType: "RETURN_TO_CONTROL" | "MODEL_CONTEXT_PROTOCOL";
+  description?: string;
+  namespace?: string;
+  permissions?: "Sufficient" | "Insufficient";
+  toolId?: string;
+}
+
+export interface AgentPromptConfig {
+  name: string;
+  status: "Draft" | "Published";
+  version: string;
+  type: string;
+}
+
+export interface AgentGuardrailConfig {
+  name: string;
+  status: "Draft" | "Published";
+  version: string;
+  type: string;
+}
+
 export interface AgentConfig {
   id: string;
   name: string;
@@ -46,6 +69,16 @@ export interface AgentConfig {
   promptTemplate: string;
   sourceBase?: "SelfServiceOrchestrator";
   enabled: boolean;
+  
+  // Deployable via AWS SDK
+  visibilityStatus?: VisibilityStatus;
+  locale?: string;
+  tools?: AgentToolConfig[];
+  
+  // Local metadata only (Not yet supported by AWS SDK for programmatic deployment or just for UI)
+  securityProfiles?: string[];
+  prompts?: AgentPromptConfig[];
+  guardrails?: AgentGuardrailConfig[];
 }
 
 export interface HandoffConfig {

@@ -9,6 +9,7 @@ export default function AgentsPage() {
   const [mounted, setMounted] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [editingAgentIndex, setEditingAgentIndex] = useState<number | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -26,6 +27,7 @@ export default function AgentsPage() {
     const newAgents = [...projectConfig.agents];
     newAgents.splice(index, 1);
     updateProjectConfig({ agents: newAgents });
+    setEditingAgentIndex(null);
   };
 
   const handleAddAgent = () => {
@@ -38,8 +40,16 @@ export default function AgentsPage() {
       apiFormat: "MESSAGES",
       promptTemplate: "Enter your YAML prompt here",
       enabled: true,
+      visibilityStatus: "SAVED",
+      locale: "en_US",
+      securityProfiles: [],
+      tools: [],
+      prompts: [],
+      guardrails: [],
     };
-    updateProjectConfig({ agents: [...projectConfig.agents, newAgent] });
+    const newAgents = [...projectConfig.agents, newAgent];
+    updateProjectConfig({ agents: newAgents });
+    setEditingAgentIndex(newAgents.length - 1);
   };
 
   const handleFetchAgents = async () => {
@@ -57,7 +67,6 @@ export default function AgentsPage() {
       const fetchedAgents: AgentConfig[] = data.agents || [];
       const currentNames = new Set(projectConfig.agents.map(a => a.name));
       
-      // Skip agents with duplicate names (as per plan decision)
       const newAgents = fetchedAgents.filter(a => !currentNames.has(a.name));
       
       if (newAgents.length > 0) {
@@ -76,6 +85,19 @@ export default function AgentsPage() {
       setIsFetching(false);
     }
   };
+
+  if (editingAgentIndex !== null && projectConfig.agents[editingAgentIndex]) {
+    return (
+      <div className="h-[calc(100vh-6rem)] -mt-6 -mx-6 md:-mt-8 md:-mx-8 lg:-mt-8 lg:-mx-8">
+        <AgentConfigCard 
+          config={projectConfig.agents[editingAgentIndex]}
+          onChange={(updated) => handleUpdateAgent(editingAgentIndex, updated)}
+          onRemove={() => handleRemoveAgent(editingAgentIndex)}
+          onClose={() => setEditingAgentIndex(null)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -139,14 +161,42 @@ export default function AgentsPage() {
           </button>
         </div>
       ) : (
-        <div className="space-y-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {projectConfig.agents.map((agent, index) => (
-            <AgentConfigCard 
-              key={agent.id}
-              config={agent}
-              onChange={(updated) => handleUpdateAgent(index, updated)}
-              onRemove={() => handleRemoveAgent(index)}
-            />
+            <div key={agent.id} className={`bg-white rounded-lg border ${agent.enabled ? "border-gray-200" : "border-gray-200 opacity-60"} shadow-sm flex flex-col`}>
+              <div className="p-5 flex-1">
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="text-lg font-bold text-gray-900 truncate pr-2">{agent.name}</h3>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${agent.visibilityStatus === "PUBLISHED" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>
+                      {agent.visibilityStatus === "PUBLISHED" ? "Published" : "Draft"}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-500 line-clamp-2 h-10 mb-4">{agent.description}</p>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded">{agent.agentType}</span>
+                  <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded">{agent.locale || "en_US"}</span>
+                </div>
+              </div>
+              <div className="bg-gray-50 px-5 py-3 border-t border-gray-200 flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    checked={agent.enabled}
+                    onChange={() => handleUpdateAgent(index, { ...agent, enabled: !agent.enabled })}
+                  />
+                  <span className="text-sm text-gray-700 font-medium">Deploy</span>
+                </label>
+                <button
+                  onClick={() => setEditingAgentIndex(index)}
+                  className="text-sm text-blue-600 font-medium hover:text-blue-800"
+                >
+                  Edit in Builder
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       )}
