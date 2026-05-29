@@ -267,20 +267,20 @@ function normalizeFlowContent(flowJson: string): string {
       // Intentionally preserving all AI agent configurations if present
     }
 
-    // UpdateContactAttributes: ensure the Q in Connect session ARN uses the correct attribute key
+    // UpdateContactAttributes: ensure the Q in Connect session ARN is mapped to a normal attribute for debug/context
     if (action.Type === "UpdateContactAttributes") {
       const params = action.Parameters as Record<string, unknown> | undefined;
       const attrs = params?.Attributes as Record<string, unknown> | undefined;
       if (attrs) {
-        // LLM may hallucinate "wisdomSessionArn" — rename to the correct Lex session attribute key
-        if (attrs.wisdomSessionArn === "$.Wisdom.SessionArn") {
+        // LLM may produce wisdomSessionArn, WisdomSessionArn, or the old key — normalize to a standard name for debug/context
+        if (attrs.wisdomSessionArn === "$.Wisdom.SessionArn" || 
+            (attrs as any).WisdomSessionArn === "$.Wisdom.SessionArn" ||
+            attrs["x-amz-lex:q-in-connect:session-arn"] === "$.Wisdom.SessionArn" ||
+            attrs.qInConnectSessionArn === "$.Wisdom.SessionArn") {
           delete attrs.wisdomSessionArn;
-          attrs["x-amz-lex:q-in-connect:session-arn"] = "$.Wisdom.SessionArn";
-        }
-        // Also catch "WisdomSessionArn" (PascalCase variant)
-        if ((attrs as any).WisdomSessionArn === "$.Wisdom.SessionArn") {
           delete (attrs as any).WisdomSessionArn;
-          attrs["x-amz-lex:q-in-connect:session-arn"] = "$.Wisdom.SessionArn";
+          delete attrs["x-amz-lex:q-in-connect:session-arn"];
+          attrs["qInConnectSessionArn"] = "$.Wisdom.SessionArn";
         }
         // Connect API rejects empty Attributes object
         if (Object.keys(attrs).length === 0) {
@@ -316,6 +316,13 @@ function normalizeFlowContent(flowJson: string): string {
           if (inner.Text != null) inner.Text = String(inner.Text);
         }
       }
+
+      // Ensure LexSessionAttributes is set with the correct x-amz-lex:q-in-connect:session-arn
+      if (!params.LexSessionAttributes || typeof params.LexSessionAttributes !== "object") {
+        params.LexSessionAttributes = {};
+      }
+      const lexSessionAttrs = params.LexSessionAttributes as Record<string, unknown>;
+      lexSessionAttrs["x-amz-lex:q-in-connect:session-arn"] = "$.Wisdom.SessionArn";
 
       action.Parameters = params;
     }
@@ -416,11 +423,16 @@ function normalizeFlowContent(flowJson: string): string {
   const hasWisdom = actions.some((a) => a.Type === "CreateWisdomSession");
   const lexAction = actions.find((a) => a.Type === "ConnectParticipantWithLexBot");
   if (hasWisdom && lexAction) {
-    // Check if any UpdateContactAttributes block sets x-amz-lex:q-in-connect:session-arn
+    // Check if any UpdateContactAttributes block sets a session ARN contact attribute
     const hasSessionArnAttr = actions.some((a) => {
       if (a.Type !== "UpdateContactAttributes") return false;
       const attrs = (a.Parameters as Record<string, unknown> | undefined)?.Attributes as Record<string, unknown> | undefined;
-      return attrs && "x-amz-lex:q-in-connect:session-arn" in attrs;
+      return attrs && (
+        "qInConnectSessionArn" in attrs ||
+        "wisdomSessionArn" in attrs ||
+        "WisdomSessionArn" in attrs ||
+        "x-amz-lex:q-in-connect:session-arn" in attrs
+      );
     });
 
     if (!hasSessionArnAttr) {
@@ -438,7 +450,7 @@ function normalizeFlowContent(flowJson: string): string {
         Type: "UpdateContactAttributes",
         Parameters: {
           Attributes: {
-            "x-amz-lex:q-in-connect:session-arn": "$.Wisdom.SessionArn"
+            "qInConnectSessionArn": "$.Wisdom.SessionArn"
           },
           TargetContact: "Current"
         },

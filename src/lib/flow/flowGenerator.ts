@@ -135,7 +135,7 @@ Block 3 — CreateWisdomSession (initialise Q Connect — the AI agent is config
 Block 4 — UpdateContactAttributes (link the Q Connect session to the contact):
   Parameters: {
     "Attributes": {
-      "x-amz-lex:q-in-connect:session-arn": "$.Wisdom.SessionArn"
+      "qInConnectSessionArn": "$.Wisdom.SessionArn"
     },
     "TargetContact": "Current"
   }
@@ -148,6 +148,9 @@ Block 5 — ConnectParticipantWithLexBot (invoke the Q Connect AI agent via the 
     "Text": "${journeyConfig.welcomeMessage}",
     "LexTimeoutSeconds": {
       "Text": "300"
+    },
+    "LexSessionAttributes": {
+      "x-amz-lex:q-in-connect:session-arn": "$.Wisdom.SessionArn"
     },
     "LexV2Bot": {
       "AliasArn": "${lexBotAliasArn}"
