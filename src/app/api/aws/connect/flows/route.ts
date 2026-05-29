@@ -283,12 +283,22 @@ function normalizeFlowContent(flowJson: string): string {
       }
     }
 
-    // ConnectParticipantWithLexBot: Connect rejects SessionState (even as {}) — remove it if present
+    // ConnectParticipantWithLexBot: sanitise parameters for Connect API
     if (action.Type === "ConnectParticipantWithLexBot") {
       const params = (action.Parameters ?? {}) as Record<string, unknown>;
-      delete params.SessionState;
+      delete params.SessionState; // Connect rejects SessionState (even as {})
+
+      // LexTimeoutSeconds: Connect rejects { "Text": "300" } — must be a plain integer
+      if (params.LexTimeoutSeconds != null) {
+        if (typeof params.LexTimeoutSeconds === "object" && params.LexTimeoutSeconds !== null) {
+          const inner = (params.LexTimeoutSeconds as Record<string, unknown>).Text;
+          params.LexTimeoutSeconds = parseInt(String(inner ?? "300"), 10) || 300;
+        } else if (typeof params.LexTimeoutSeconds === "string") {
+          params.LexTimeoutSeconds = parseInt(params.LexTimeoutSeconds, 10) || 300;
+        }
+      }
+
       action.Parameters = params;
-      // Not terminal — must have NextAction in Transitions
     }
 
     // UpdateContactAttributes: Connect requires TargetContact: "Current"
@@ -376,24 +386,19 @@ function normalizeFlowContent(flowJson: string): string {
       });
     }
 
-    // 4. Ensure Lex Bot block has NoMatchingCondition ONLY if it has conditions, and NoMatchingError
-    // 4. Ensure Lex Bot block has NoMatchingCondition and NoMatchingError
+    // 4. Ensure ConnectParticipantWithLexBot has all three required error branches
     if (action.Type === "ConnectParticipantWithLexBot") {
       const errTarget = Array.isArray(trans.Errors) && trans.Errors.length > 0 
         ? (trans.Errors[0] as Record<string, unknown>).NextAction 
         : (trans.NextAction ?? action.Identifier);
-        
-      if (!seenErrors.has("NoMatchingCondition")) {
-        (trans.Errors as Record<string, unknown>[]).push({
-          NextAction: errTarget,
-          ErrorType: "NoMatchingCondition"
-        });
-      }
-      if (!seenErrors.has("NoMatchingError")) {
-        (trans.Errors as Record<string, unknown>[]).push({
-          NextAction: errTarget,
-          ErrorType: "NoMatchingError"
-        });
+
+      for (const requiredErr of ["NoMatchingCondition", "NoMatchingError", "InputTimeLimitExceeded"]) {
+        if (!seenErrors.has(requiredErr)) {
+          (trans.Errors as Record<string, unknown>[]).push({
+            NextAction: errTarget,
+            ErrorType: requiredErr
+          });
+        }
       }
     }
   }
