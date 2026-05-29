@@ -4,6 +4,14 @@ import { useEffect } from "react";
 import { RoutingRuleRow } from "@/components/RoutingRuleRow";
 import type { JourneyConfig, RoutingRule } from "@/types/experience";
 
+const SUPPORTED_LANGUAGES = [
+  { code: "en-US", voice: "Joanna", label: "English (US)" },
+  { code: "en-GB", voice: "Amy", label: "English (UK)" },
+  { code: "en-AU", voice: "Olivia", label: "English (Australia)" },
+  { code: "es-US", voice: "Lupe", label: "Spanish (US)" },
+  { code: "fr-CA", voice: "Chantal", label: "French (Canada)" }
+];
+
 interface QAgent { name: string; arn: string; type: string }
 interface LexBot { aliasArn: string; label: string }
 
@@ -152,6 +160,27 @@ export function JourneyConfigurator({ config, onChange, agents, queues, qAgents,
             Required for flow generation. Set this in Settings → Q Connect Lex Bot ARN or select above.
           </p>
         )}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Chat / TTS Language
+          <span className="ml-1 text-xs font-normal text-gray-400">must match your Lex bot locale</span>
+        </label>
+        <select
+          className={inputClass}
+          value={config.languageCode || "en-US"}
+          onChange={(e) => {
+            const selected = SUPPORTED_LANGUAGES.find(l => l.code === e.target.value);
+            if (selected) {
+              onChange({ ...config, languageCode: selected.code, voiceId: selected.voice });
+            }
+          }}
+        >
+          {SUPPORTED_LANGUAGES.map((lang) => (
+            <option key={lang.code} value={lang.code}>{lang.label} ({lang.code})</option>
+          ))}
+        </select>
       </div>
 
       <div>

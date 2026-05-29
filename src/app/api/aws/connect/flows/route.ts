@@ -73,8 +73,7 @@ function fixTransitions(t: Record<string, unknown>, blockType?: string): void {
 }
 
 // TransferToFlow is rejected by the CreateContactFlow API regardless of parameters.
-// UpdateContactData is not a valid Connect flow block — Wisdom session ARN is accessed via $.Wisdom.SessionArn directly.
-const ALWAYS_UNSUPPORTED = new Set(["TransferToFlow", "UpdateContactData"]);
+const ALWAYS_UNSUPPORTED = new Set(["TransferToFlow"]);
 
 function rewriteNextBlockId(obj: Record<string, unknown>): void {
   // Nova Pro variant 3: uses NextBlockId instead of NextAction throughout
@@ -263,14 +262,9 @@ function normalizeFlowContent(flowJson: string): string {
       }
     }
 
-    // CreateWisdomSession: only WisdomAssistantArn is accepted — strip any AI agent config added by older generators
+    // CreateWisdomSession: Allow OrchestrationAIAgentConfiguration to pass through (do not strip)
     if (action.Type === "CreateWisdomSession") {
-      const params = action.Parameters as Record<string, unknown> | undefined;
-      if (params) {
-        delete params.OrchestrationAIAgentConfiguration;
-        delete params.AIAgentArn;
-        delete params.AgentVersionArn;
-      }
+      // Intentionally preserving all AI agent configurations if present
     }
 
     // UpdateContactAttributes: remove wisdomSessionArn if its value is a dynamic reference —
@@ -307,12 +301,13 @@ function normalizeFlowContent(flowJson: string): string {
       }
     }
 
-    // Fix GetUserInput to ConnectParticipantWithLexBot (in case LLM uses the wrong name)
+    // Fix hallucinated GetUserInput or GetParticipantInput (when used for Lex) to ConnectParticipantWithLexBot
     if (action.Type === "GetUserInput" || action.Type === "GetParticipantInput") {
-      // If it has LexV2Bot, it's definitely a Lex bot block
       const p = action.Parameters as Record<string, unknown> | undefined;
       if (p && p.LexV2Bot) {
         action.Type = "ConnectParticipantWithLexBot";
+      } else if (action.Type === "GetUserInput") {
+        action.Type = "GetParticipantInput";
       }
     }
 
@@ -327,11 +322,28 @@ function normalizeFlowContent(flowJson: string): string {
           delete params.Media;
         }
       }
+
+      // If the LLM hallucinates LexInitializationData.InitialMessage as an object, flatten it
+      if (params && params.LexInitializationData && typeof params.LexInitializationData === "object") {
+        const lexData = params.LexInitializationData as Record<string, unknown>;
+        if (lexData.InitialMessage && typeof lexData.InitialMessage === "object") {
+          const initMsgObj = lexData.InitialMessage as Record<string, unknown>;
+          if (typeof initMsgObj.Text === "string") {
+            lexData.InitialMessage = initMsgObj.Text;
+          }
+        }
+      }
     }
   }
 
   // Final guard: enforce strict ErrorType rules for all blocks to satisfy Connect API.
   for (const action of actions) {
+    if (action.Type === "UpdateFlowLoggingBehavior" || action.Type === "DisconnectParticipant") {
+      const trans = action.Transitions as Record<string, unknown> | undefined;
+      if (trans) delete trans.Errors;
+      continue;
+    }
+
     const trans = action.Transitions as Record<string, unknown> | undefined;
     if (!trans) continue;
     if (!Array.isArray(trans.Errors)) trans.Errors = [];
@@ -364,17 +376,22 @@ function normalizeFlowContent(flowJson: string): string {
       });
     }
 
-    // 4. Ensure Lex Bot block has BOTH NoMatchingCondition and NoMatchingError
+    // 4. Ensure Lex Bot block has NoMatchingCondition ONLY if it has conditions, and NoMatchingError
+    // 4. Ensure Lex Bot block has NoMatchingCondition and NoMatchingError
     if (action.Type === "ConnectParticipantWithLexBot") {
+      const errTarget = Array.isArray(trans.Errors) && trans.Errors.length > 0 
+        ? (trans.Errors[0] as Record<string, unknown>).NextAction 
+        : (trans.NextAction ?? action.Identifier);
+        
       if (!seenErrors.has("NoMatchingCondition")) {
         (trans.Errors as Record<string, unknown>[]).push({
-          NextAction: trans.NextAction ?? action.Identifier,
+          NextAction: errTarget,
           ErrorType: "NoMatchingCondition"
         });
       }
       if (!seenErrors.has("NoMatchingError")) {
         (trans.Errors as Record<string, unknown>[]).push({
-          NextAction: trans.NextAction ?? action.Identifier,
+          NextAction: errTarget,
           ErrorType: "NoMatchingError"
         });
       }
@@ -383,12 +400,62 @@ function normalizeFlowContent(flowJson: string): string {
 
   // Inject Metadata. Connect UI imports auto-generate this, but Connect API requires it
   // or it will throw an InvalidContactFlowException: UnknownError.
-  const actionMetadata: Record<string, unknown> = {};
+  const VOICE_LANG_MAP: Record<string, string> = {
+    Joanna: "en-US",
+    Amy: "en-GB",
+    Olivia: "en-AU",
+    Lupe: "es-US",
+    Chantal: "fr-CA"
+  };
+
+  const actionMetadata: Record<string, any> = {};
   actions.forEach((action, index) => {
     if (action.Identifier) {
       actionMetadata[action.Identifier as string] = {
-        Position: { X: (index % 5) * 200, Y: Math.floor(index / 5) * 150 },
+        position: { x: (index % 5) * 200, y: Math.floor(index / 5) * 150 },
       };
+      
+      // Ensure languageCode metadata is present so the Connect UI parses it correctly
+      if (action.Type === "UpdateContactTextToSpeechVoice") {
+        const params = action.Parameters as Record<string, unknown> | undefined;
+        const voice = params?.TextToSpeechVoice as string | undefined;
+        if (voice) {
+          actionMetadata[action.Identifier as string].parameters = {
+            TextToSpeechVoice: {
+              languageCode: VOICE_LANG_MAP[voice] || "en-US"
+            }
+          };
+        }
+      }
+
+      if (action.Type === "ConnectParticipantWithLexBot") {
+        actionMetadata[action.Identifier as string].parameters = {
+          LexV2Bot: {
+            AliasArn: {}
+          }
+        };
+        actionMetadata[action.Identifier as string].lexV2BotName = "";
+        actionMetadata[action.Identifier as string].conditionMetadata = [];
+      }
+
+      if (action.Type === "Compare") {
+        const trans2 = action.Transitions as Record<string, unknown> | undefined;
+        const conditions = (trans2?.Conditions as Record<string, unknown>[] | undefined) ?? [];
+        const condMetadata = conditions.map((c, i) => {
+          const operandValue = (c.Condition as any)?.Operands?.[0] as string || "";
+          return {
+            id: `cond-id-${i}`,
+            operator: {
+              name: "Equals",
+              value: "Equals",
+              shortDisplay: "="
+            },
+            value: operandValue
+          };
+        });
+        actionMetadata[action.Identifier as string].conditions = [];
+        actionMetadata[action.Identifier as string].conditionMetadata = condMetadata;
+      }
     }
   });
 

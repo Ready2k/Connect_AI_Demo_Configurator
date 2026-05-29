@@ -8,6 +8,7 @@ import { useLogStore } from "@/store/logStore";
 import { JourneyConfigurator } from "@/components/JourneyConfigurator";
 import { FlowCanvas } from "@/components/FlowCanvas";
 import { WebRTCTester } from "@/components/WebRTCTester";
+import { ConnectChatTester } from "@/components/ConnectChatTester";
 import { Loader2 } from "lucide-react";
 import type { ExperienceConfig, JourneyConfig } from "@/types/experience";
 
@@ -43,6 +44,8 @@ const defaultJourney: JourneyConfig = {
   ],
   fallbackQueueId: "",
   fallbackQueueName: "",
+  languageCode: "en-US",
+  voiceId: "Joanna",
 };
 
 export default function ExperiencePage() {
@@ -61,6 +64,7 @@ export default function ExperiencePage() {
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [showRawJson, setShowRawJson] = useState(false);
   const [voiceTestOpen, setVoiceTestOpen] = useState(false);
+  const [chatTestOpen, setChatTestOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<{ flowId: string; flowArn?: string; updated: boolean } | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
@@ -153,6 +157,12 @@ export default function ExperiencePage() {
 
   const handleGenerate = async (feedback?: { issues: unknown[]; suggestions: unknown[]; previousFlowJson: string }) => {
     if (!activeExperience || !activeExperienceId) return;
+    
+    if (!projectConfig.aws.lexBotAliasArn || projectConfig.aws.lexBotAliasArn.trim() === "") {
+      alert("Select a valid Lex V2 bot alias before publishing this flow. Placeholder Lex ARNs are not allowed.");
+      return;
+    }
+
     setGenerating(true);
     updateExperience(activeExperienceId, {
       generationStatus: "generating",
@@ -251,6 +261,11 @@ export default function ExperiencePage() {
 
   const handleAutoLoop = async () => {
     if (!activeExperience || !activeExperienceId) return;
+    
+    if (!projectConfig.aws.lexBotAliasArn || projectConfig.aws.lexBotAliasArn.trim() === "") {
+      alert("Select a valid Lex V2 bot alias before publishing this flow. Placeholder Lex ARNs are not allowed.");
+      return;
+    }
 
     // Snapshot immutable values before the loop — store reads inside async loops are stale
     const journeyConfig = activeExperience.journeyConfig;
@@ -383,8 +398,64 @@ export default function ExperiencePage() {
     setLoopDone(true);
   };
 
+  const validateFlowBeforePublish = (flowJson: string): string | null => {
+    try {
+      if (!projectConfig.aws.lexBotAliasArn || projectConfig.aws.lexBotAliasArn.trim() === "") {
+        return "Select a valid Lex V2 bot alias before publishing this flow. Placeholder Lex ARNs are not allowed.";
+      }
+      
+      if (flowJson.includes("REPLACE_WITH_LEX_BOT_ALIAS_ARN")) {
+        return "Flow contains placeholder Lex ARNs.";
+      }
+      
+      const parsed = JSON.parse(flowJson);
+      const blocks = parsed.Actions || [];
+      const blockIds = new Set(blocks.map((b: any) => b.Identifier));
+      
+      for (const block of blocks) {
+        if (block.Type === "CreateWisdomSession") {
+          if (!block.Parameters?.WisdomAssistantArn) {
+            return `WisdomAssistantArn is missing in CreateWisdomSession (block ${block.Identifier}).`;
+          }
+        }
+        
+        const transitions = block.Transitions;
+        if (transitions) {
+          if (transitions.NextAction && !blockIds.has(transitions.NextAction)) {
+            return `NextAction ${transitions.NextAction} referenced in block ${block.Identifier} does not exist.`;
+          }
+          if (transitions.Errors) {
+            for (const err of transitions.Errors) {
+              if (err.NextAction && !blockIds.has(err.NextAction)) {
+                return `Error NextAction ${err.NextAction} referenced in block ${block.Identifier} does not exist.`;
+              }
+              // Check if error goes straight to disconnect
+              if (err.NextAction && block.Type !== "MessageParticipant") {
+                const nextBlock = blocks.find((b: any) => b.Identifier === err.NextAction);
+                if (nextBlock && nextBlock.Type === "DisconnectParticipant") {
+                  return `Error branch in block ${block.Identifier} goes straight to Disconnect. Please route to a MessageParticipant block first.`;
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      return null;
+    } catch (err) {
+      return "Invalid JSON flow format.";
+    }
+  };
+
   const handlePublish = async () => {
     if (!activeExperience?.generatedFlowJson || !activeExperienceId) return;
+    
+    const validationError = validateFlowBeforePublish(activeExperience.generatedFlowJson);
+    if (validationError) {
+      alert(`Publish blocked: ${validationError}`);
+      return;
+    }
+
     setPublishing(true);
     setPublishError(null);
     setPublishResult(null);
@@ -786,6 +857,20 @@ export default function ExperiencePage() {
               {voiceTestOpen && (
                 <div className="px-4 pb-4">
                   <WebRTCTester discoveredFlows={flows} />
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-lg">
+              <button
+                onClick={() => setChatTestOpen(!chatTestOpen)}
+                className="w-full text-left px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
+              >
+                {chatTestOpen ? "▾" : "▸"} Chat Test (Connect Native)
+              </button>
+              {chatTestOpen && (
+                <div className="px-4 pb-4">
+                  <ConnectChatTester discoveredFlows={flows} />
                 </div>
               )}
             </div>

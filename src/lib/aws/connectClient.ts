@@ -14,6 +14,8 @@ import {
   ListPhoneNumbersV2CommandInput,
   StartWebRTCContactCommand,
   StartWebRTCContactCommandInput,
+  StartChatContactCommand,
+  StartChatContactCommandInput,
   CreateContactFlowCommand,
   CreateContactFlowCommandInput,
   UpdateContactFlowContentCommand,
@@ -58,6 +60,11 @@ export async function listPhoneNumbersV2(client: ConnectClient, input: ListPhone
 
 export async function startWebRTCContact(client: ConnectClient, input: StartWebRTCContactCommandInput) {
   const command = new StartWebRTCContactCommand(input);
+  return await client.send(command);
+}
+
+export async function startChatContact(client: ConnectClient, input: StartChatContactCommandInput) {
+  const command = new StartChatContactCommand(input);
   return await client.send(command);
 }
 

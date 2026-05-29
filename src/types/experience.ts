@@ -18,6 +18,8 @@ export interface JourneyConfig {
   fallbackQueueName: string;
   lexBotAliasArn?: string;
   wisdomAgentArn?: string;
+  languageCode?: string;
+  voiceId?: string;
 }
 
 export type GenerationStatus = "idle" | "generating" | "success" | "manual_review";

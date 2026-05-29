@@ -35,7 +35,7 @@ The Q Connect AI Agent this flow hands the customer to is: "${ctx.name}"
 
 Purpose: ${ctx.description || "(no description provided)"}
 
-Tools this agent can invoke (these are the exact values it signals via $.Lex.SessionAttributes.Tool —
+Tools this agent can invoke (these are the exact values it signals via $.Lex.SessionAttributes.AuthResult —
 use these names verbatim in the Compare block Conditions):
 ${toolLines}
 
@@ -68,17 +68,19 @@ function buildGenerationSystemPrompt(
   // Versioned agent ARN — Connect requires :$LATEST suffix on OrchestrationAIAgentConfiguration
   const versionedAgentArn = agentArn.endsWith(":$LATEST") ? agentArn : `${agentArn}:$LATEST`;
 
-  const lexBotAliasArn = journeyConfig.lexBotAliasArn || "REPLACE_WITH_LEX_BOT_ALIAS_ARN";
+  if (!journeyConfig.lexBotAliasArn) {
+    throw new Error("Missing lexBotAliasArn. Cannot generate flow without a valid Lex Bot ARN.");
+  }
+  const lexBotAliasArn = journeyConfig.lexBotAliasArn;
 
   // Each "queue" routing rule transfers to that specific queue (real handoff).
   // Each "disconnect" or "agent" rule ends the call.
   const rulesText = journeyConfig.routingRules
     .map((r) => {
       if (r.action === "queue") {
-        const qId = r.targetQueueId || "REPLACE_WITH_QUEUE_ARN";
-        return `   - Condition "${r.condition}": UpdateContactTargetQueue (QueueId: "${qId}") -> TransferContactToQueue (Parameters: {}, Transitions to fallback on NextAction/QueueAtCapacity/NoMatchingError)`;
+        return `   - Condition "${r.condition}": TransferContactToQueue (Parameters: {}, Transitions to fallback on NextAction/QueueAtCapacity/NoMatchingError)`;
       }
-      return `   - Condition "${r.condition}": DisconnectParticipant (Parameters: {}, Transitions: {})`;
+      return `   - Condition "${r.condition}": MessageParticipant (Parameters: { "Text": "Thank you. Your request has been processed successfully. Goodbye!" }) -> Transitions to DisconnectParticipant`;
     })
     .join("\n");
 
@@ -112,50 +114,84 @@ MANDATORY BLOCK SEQUENCE — generate exactly these blocks in this order:
 
 Block 1 — UpdateFlowLoggingBehavior:
   Parameters: { "FlowLoggingBehavior": "Enabled" }
-  Transitions: { "NextAction": "<block2>" }
+  Transitions: { "NextAction": "<block1a>" }
   *** No Errors array — Connect rejects it on this block type ***
+
+Block 1a — UpdateContactTextToSpeechVoice (set the language for Lex to recognise chat sessions properly):
+  Parameters: {
+    "TextToSpeechVoice": "${journeyConfig.voiceId ?? 'Joanna'}"
+  }
+  Transitions: { "NextAction": "<block2>", "Errors": [{ "NextAction": "<block2>", "ErrorType": "NoMatchingError" }] }
 
 Block 2 — UpdateContactTargetQueue (set fallback queue upfront so all error paths are safe):
   Parameters: { "QueueId": "${fallbackQueueId}" }
-  Transitions: { "NextAction": "<block3>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
+  Transitions: { "NextAction": "<block3>", "Errors": [{ "NextAction": "<fallback_message>", "ErrorType": "NoMatchingError" }] }
 
 Block 3 — CreateWisdomSession (initialise Q Connect — the AI agent is configured on the assistant, NOT here):
   *** Only WisdomAssistantArn is accepted. Do NOT add OrchestrationAIAgentConfiguration or any other key. ***
   Parameters: { "WisdomAssistantArn": "${assistantArn}" }
-  Transitions: { "NextAction": "<block4>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
+  Transitions: { "NextAction": "<block4>", "Errors": [{ "NextAction": "<fallback_message>", "ErrorType": "NoMatchingError" }] }
 
-Block 4 — ConnectParticipantWithLexBot (invoke the Q Connect AI agent via the Lex bot):
+Block 4 — UpdateContactAttributes (link the Q Connect session to the contact):
+  Parameters: { "WisdomSessionArn": "$.Wisdom.SessionArn", "TargetContact": "Current" }
+  Transitions: { "NextAction": "<block5>", "Errors": [{ "NextAction": "<fallback_message>", "ErrorType": "NoMatchingError" }] }
+
+Block 5 — ConnectParticipantWithLexBot (invoke the Q Connect AI agent via the Lex bot):
   *** THIS IS THE BLOCK THAT RUNS THE AI AGENT CONVERSATION ***
   The block type is ConnectParticipantWithLexBot.
-  The customer speaks to the Lex bot here. The Lex bot drives the full multi-turn conversation.
-  When the AI agent calls a tool (Complete, Escalate, etc.) Lex exits and the flow continues.
   Parameters: {
     "Text": "${journeyConfig.welcomeMessage}",
+    "LexTimeoutSeconds": {
+      "Text": "300"
+    },
     "LexV2Bot": {
       "AliasArn": "${lexBotAliasArn}"
     }
   }
-  Transitions: { "NextAction": "<block5>", "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingError" }] }
+  Transitions: { "NextAction": "<block6>", "Errors": [{ "NextAction": "<block5_error>", "ErrorType": "NoMatchingError" }, { "NextAction": "<block5_error>", "ErrorType": "InputTimeLimitExceeded" }] }
 
-Block 5 — Compare (read the tool signal set by the AI agent and route accordingly):
-  Parameters: { "ComparisonValue": "$.Lex.SessionAttributes.Tool" }
+Block 5_error — MessageParticipant (inform user if Lex fails):
+  Type: MessageParticipant
+  Parameters: {
+    "Text": "Sorry, we're having trouble connecting you to the AI agent. I'll connect you to someone who can help."
+  }
+  Transitions: { "NextAction": "<fallback_transfer>", "Errors": [{ "NextAction": "<fallback_transfer>", "ErrorType": "NoMatchingError" }] }
+
+Block 6 — Compare (read the tool signal set by the AI agent and route accordingly):
+  Parameters: { "ComparisonValue": "$.Lex.SessionAttributes.AuthResult" }
   Transitions:
     "NextAction": "<fallback>"  (default — no condition matched)
     "Conditions": [ one entry per routing rule below ]
     "Errors": [{ "NextAction": "<fallback>", "ErrorType": "NoMatchingCondition" }]
 
-ROUTING CONDITIONS for the Compare block (generate one block per rule after block 5):
+ROUTING CONDITIONS for the Compare block (generate one block per rule after block 6):
 ${rulesText}
-  Default (NextAction, no condition matched) → <fallback>
-  Errors (NoMatchingCondition) → <fallback>
+  Default (NextAction, no condition matched) → <fallback_message>
+  Errors (NoMatchingCondition) → <fallback_message>
 
-FALLBACK BLOCK (shared terminal for all unmatched/error paths):
-  Type: DisconnectParticipant, Parameters: {}, Transitions: {}
+FALLBACK SEQUENCE (shared terminal for all unmatched/error paths):
+  Block fallback_message (route all Error paths and default Compare conditions here):
+    Type: MessageParticipant
+    Parameters: { "Text": "Sorry, we're having trouble processing your request. I'll connect you to someone who can help." }
+    Transitions: { "NextAction": "<fallback_transfer>", "Errors": [{ "NextAction": "<fallback_transfer>", "ErrorType": "NoMatchingError" }] }
+    
+  Block fallback_transfer (route fallback messages and specific errors here):
+    Type: TransferContactToQueue
+    Parameters: {}
+    Transitions: { "NextAction": "<fatal_error_message>", "Errors": [{ "NextAction": "<fatal_error_message>", "ErrorType": "QueueAtCapacity" }, { "NextAction": "<fatal_error_message>", "ErrorType": "NoMatchingError" }] }
+    
+  Block fatal_error_message (tell the user we cannot connect them before disconnecting):
+    Type: MessageParticipant
+    Parameters: { "Text": "We are currently experiencing technical difficulties and cannot complete your call. Please try again later. Goodbye." }
+    Transitions: { "NextAction": "<disconnect>", "Errors": [{ "NextAction": "<disconnect>", "ErrorType": "NoMatchingError" }] }
+    
+  Block disconnect (only referenced by fatal_error_message and specific rules):
+    Type: DisconnectParticipant, Parameters: {}, Transitions: {}
 
 TERMINAL BLOCK RULES:
-  TransferContactToQueue: NOT terminal. MUST have Parameters: {}. Transitions MUST include NextAction, and Errors for "QueueAtCapacity" and "NoMatchingError". Route all of these to <fallback>.
+  TransferContactToQueue: NOT terminal. MUST have Parameters: {}. Transitions MUST include NextAction, and Errors for "QueueAtCapacity" and "NoMatchingError". Route all of these to <fallback_message>.
   DisconnectParticipant: terminal — MUST have Parameters: {} and Transitions: {}.
-  ConnectParticipantWithLexBot: NOT terminal — it continues to the Compare block when the bot session ends.
+  ConnectParticipantWithLexBot / GetParticipantInput: NOT terminal — it continues to the Compare block when the bot session ends.
 
 ERRORS RULES:
   Every non-terminal block MUST have an Errors array in its Transitions.

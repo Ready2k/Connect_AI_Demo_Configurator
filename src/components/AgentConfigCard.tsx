@@ -1,6 +1,7 @@
 "use client";
 import { AgentConfig, AgentToolConfig, AgentGuardrailConfig, AwsSettings } from "@/types/project";
 import { PromptEditor } from "./PromptEditor";
+import { AgentChatTester } from "./AgentChatTester";
 import { useState } from "react";
 
 interface AgentConfigCardProps {
@@ -29,7 +30,7 @@ const MOCK_SECURITY_PROFILES = [
 ];
 
 export function AgentConfigCard({ config, onChange, onRemove, onClose, aws }: AgentConfigCardProps) {
-  const [activeTab, setActiveTab] = useState<"details" | "prompts" | "tools" | "security" | "guardrails">("details");
+  const [activeTab, setActiveTab] = useState<"config" | "test">("config");
 
   const handleSaveDraft = () => {
     onChange({ ...config, visibilityStatus: "SAVED" });
@@ -77,10 +78,36 @@ export function AgentConfigCard({ config, onChange, onRemove, onClose, aws }: Ag
         </div>
       </div>
 
+      {/* Tab Bar */}
+      <div className="bg-white px-6 border-b border-gray-200 flex gap-6">
+        <button
+          onClick={() => setActiveTab("config")}
+          className={`py-3 text-sm font-medium border-b-2 ${
+            activeTab === "config" 
+              ? "border-blue-600 text-blue-600" 
+              : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Configuration
+        </button>
+        <button
+          onClick={() => setActiveTab("test")}
+          className={`py-3 text-sm font-medium border-b-2 flex items-center gap-2 ${
+            activeTab === "test" 
+              ? "border-blue-600 text-blue-600" 
+              : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Test Agent
+        </button>
+      </div>
+
       {/* Body */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-gray-50">
+      <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
         
-        {/* Details Section */}
+        {activeTab === "config" && (
+          <div className="space-y-8">
+            {/* Details Section */}
         <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
           <div className="flex justify-between items-start mb-4">
             <h3 className="text-lg font-bold text-gray-900">Details</h3>
@@ -349,6 +376,20 @@ export function AgentConfigCard({ config, onChange, onRemove, onClose, aws }: Ag
             Delete Agent
           </button>
         </div>
+          </div>
+        )}
+
+        {activeTab === "test" && (
+          <div className="h-full flex flex-col">
+            <div className="mb-4">
+              <h3 className="text-lg font-bold text-gray-900">Interactive Chat Tester</h3>
+              <p className="text-sm text-gray-500">Test how your agent responds to user input using your drafted prompt.</p>
+            </div>
+            <div className="flex-1 min-h-0">
+              <AgentChatTester config={config} aws={aws} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
