@@ -141,9 +141,9 @@ Block 4 — UpdateContactAttributes (link the Q Connect session to the contact):
   }
   Transitions: { "NextAction": "<block5>", "Errors": [{ "NextAction": "<fallback_transfer>", "ErrorType": "NoMatchingError" }] }
 
-Block 5 — ConnectParticipantWithLexBot (invoke the Q Connect AI agent via the Lex bot):
+Block 5 — GetParticipantInput (invoke the Q Connect AI agent via the Lex bot):
   *** THIS IS THE BLOCK THAT RUNS THE AI AGENT CONVERSATION ***
-  The block type is ConnectParticipantWithLexBot.
+  The block type is GetParticipantInput (NOT ConnectParticipantWithLexBot — that is a UI-only name).
   Parameters: {
     "Text": "${journeyConfig.welcomeMessage}",
     "LexTimeoutSeconds": {
@@ -153,7 +153,7 @@ Block 5 — ConnectParticipantWithLexBot (invoke the Q Connect AI agent via the 
       "AliasArn": "${lexBotAliasArn}"
     }
   }
-  Transitions: { "NextAction": "<block6>", "Errors": [{ "NextAction": "<block5_error>", "ErrorType": "NoMatchingError" }, { "NextAction": "<block5_error>", "ErrorType": "InputTimeLimitExceeded" }] }
+  Transitions: { "NextAction": "<block6>", "Errors": [{ "NextAction": "<block5_error>", "ErrorType": "NoMatchingCondition" }, { "NextAction": "<block5_error>", "ErrorType": "InputTimeLimitExceeded" }, { "NextAction": "<block5_error>", "ErrorType": "NoMatchingError" }] }
 
 Block 5_error — MessageParticipant (inform user if Lex fails):
   Type: MessageParticipant
@@ -196,7 +196,7 @@ FALLBACK SEQUENCE (shared terminal for all unmatched/error paths):
 TERMINAL BLOCK RULES:
   TransferContactToQueue: NOT terminal. MUST have Parameters: {}. Transitions MUST include NextAction, and Errors for "QueueAtCapacity" and "NoMatchingError". Route all of these to <fallback_message>.
   DisconnectParticipant: terminal — MUST have Parameters: {} and Transitions: {}.
-  ConnectParticipantWithLexBot / GetParticipantInput: NOT terminal — it continues to the Compare block when the bot session ends.
+  GetParticipantInput (Lex bot block): NOT terminal — it continues to the Compare block when the bot session ends.
 
 ERRORS RULES:
   Every non-terminal block MUST have an Errors array in its Transitions.

@@ -283,18 +283,29 @@ function normalizeFlowContent(flowJson: string): string {
       }
     }
 
-    // ConnectParticipantWithLexBot: sanitise parameters for Connect API
+    // Fix hallucinated type names → the valid API type is GetParticipantInput
+    // "ConnectParticipantWithLexBot" is the UI-designer name; the flow JSON API type is "GetParticipantInput".
+    if (action.Type === "GetUserInput") {
+      action.Type = "GetParticipantInput";
+    }
     if (action.Type === "ConnectParticipantWithLexBot") {
+      action.Type = "GetParticipantInput";
+    }
+
+    // GetParticipantInput (Lex bot block): sanitise parameters for Connect API
+    if (action.Type === "GetParticipantInput") {
       const params = (action.Parameters ?? {}) as Record<string, unknown>;
       delete params.SessionState; // Connect rejects SessionState (even as {})
 
-      // LexTimeoutSeconds: Connect rejects { "Text": "300" } — must be a plain integer
+      // LexTimeoutSeconds must be { "Text": "<seconds>" } — ensure correct shape
       if (params.LexTimeoutSeconds != null) {
-        if (typeof params.LexTimeoutSeconds === "object" && params.LexTimeoutSeconds !== null) {
-          const inner = (params.LexTimeoutSeconds as Record<string, unknown>).Text;
-          params.LexTimeoutSeconds = parseInt(String(inner ?? "300"), 10) || 300;
-        } else if (typeof params.LexTimeoutSeconds === "string") {
-          params.LexTimeoutSeconds = parseInt(params.LexTimeoutSeconds, 10) || 300;
+        if (typeof params.LexTimeoutSeconds === "number" || typeof params.LexTimeoutSeconds === "string") {
+          // Unwrapped integer/string → wrap into documented object form
+          params.LexTimeoutSeconds = { Text: String(params.LexTimeoutSeconds) };
+        } else if (typeof params.LexTimeoutSeconds === "object" && params.LexTimeoutSeconds !== null) {
+          // Already an object — ensure Text is a string
+          const inner = params.LexTimeoutSeconds as Record<string, unknown>;
+          if (inner.Text != null) inner.Text = String(inner.Text);
         }
       }
 
@@ -311,18 +322,8 @@ function normalizeFlowContent(flowJson: string): string {
       }
     }
 
-    // Fix hallucinated GetUserInput or GetParticipantInput (when used for Lex) to ConnectParticipantWithLexBot
-    if (action.Type === "GetUserInput" || action.Type === "GetParticipantInput") {
-      const p = action.Parameters as Record<string, unknown> | undefined;
-      if (p && p.LexV2Bot) {
-        action.Type = "ConnectParticipantWithLexBot";
-      } else if (action.Type === "GetUserInput") {
-        action.Type = "GetParticipantInput";
-      }
-    }
-
     // DO NOT wrap 'Text' in 'Media'. Connect API expects 'Text' directly for TTS/Chat messages.
-    if (action.Type === "MessageParticipant" || action.Type === "GetParticipantInput" || action.Type === "ConnectParticipantWithLexBot") {
+    if (action.Type === "MessageParticipant" || action.Type === "GetParticipantInput") {
       const params = action.Parameters as Record<string, unknown> | undefined;
       // If it accidentally got wrapped in Media due to earlier logic or UI export, unwrap it
       if (params && params.Media && typeof params.Media === "object") {
@@ -363,7 +364,7 @@ function normalizeFlowContent(flowJson: string): string {
       if (action.Type === "Compare" && e.ErrorType === "NoMatchingError") {
         return { ...e, ErrorType: "NoMatchingCondition" };
       }
-      if (action.Type !== "Compare" && action.Type !== "ConnectParticipantWithLexBot" && e.ErrorType === "NoMatchingCondition") {
+      if (action.Type !== "Compare" && action.Type !== "GetParticipantInput" && e.ErrorType === "NoMatchingCondition") {
         return { ...e, ErrorType: "NoMatchingError" };
       }
       return e;
@@ -386,8 +387,8 @@ function normalizeFlowContent(flowJson: string): string {
       });
     }
 
-    // 4. Ensure ConnectParticipantWithLexBot has all three required error branches
-    if (action.Type === "ConnectParticipantWithLexBot") {
+    // 4. Ensure GetParticipantInput (Lex) has all three required error branches
+    if (action.Type === "GetParticipantInput") {
       const errTarget = Array.isArray(trans.Errors) && trans.Errors.length > 0 
         ? (trans.Errors[0] as Record<string, unknown>).NextAction 
         : (trans.NextAction ?? action.Identifier);
@@ -433,7 +434,7 @@ function normalizeFlowContent(flowJson: string): string {
         }
       }
 
-      if (action.Type === "ConnectParticipantWithLexBot") {
+      if (action.Type === "GetParticipantInput" && (action.Parameters as Record<string, unknown> | undefined)?.LexV2Bot) {
         actionMetadata[action.Identifier as string].parameters = {
           LexV2Bot: {
             AliasArn: {}

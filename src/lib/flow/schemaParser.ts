@@ -6,7 +6,7 @@ function getFriendlyName(type: string): string {
   switch (type) {
     case "CreateWisdomSession":            return "Connect Assistant (Create Session)";
     case "UpdateContactData":              return "Connect Assistant (Store Session)";
-    case "ConnectParticipantWithLexBot":   return "Connect with AI Agent (Lex + Q Connect)";
+    case "ConnectParticipantWithLexBot":   return "Connect with AI Agent (Lex + Q Connect)";  // UI-only name
     case "Compare":                        return "Route by Condition";
     case "UpdateContactAttributes":        return "Set Contact Attributes";
     case "UpdateContactTargetQueue":       return "Set Target Queue";
@@ -59,7 +59,8 @@ export function parseFlowContent(flowJson: string): ParsedFlow {
     // Both blocks together constitute the Q Connect integration pattern
     if (
       type === "CreateWisdomSession" ||
-      type === "ConnectParticipantWithLexBot"
+      type === "ConnectParticipantWithLexBot" ||
+      type === "GetParticipantInput"  // GetParticipantInput with LexV2Bot is the API equivalent
     ) hasConnectAssistantBlock = true;
     typeSet.add(friendly);
     actions.push({
