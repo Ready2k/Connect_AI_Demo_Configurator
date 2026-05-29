@@ -141,9 +141,9 @@ Block 4 — UpdateContactAttributes (link the Q Connect session to the contact):
   }
   Transitions: { "NextAction": "<block5>", "Errors": [{ "NextAction": "<fallback_transfer>", "ErrorType": "NoMatchingError" }] }
 
-Block 5 — GetParticipantInput (invoke the Q Connect AI agent via the Lex bot):
+Block 5 — ConnectParticipantWithLexBot (invoke the Q Connect AI agent via the Lex bot):
   *** THIS IS THE BLOCK THAT RUNS THE AI AGENT CONVERSATION ***
-  The block type is GetParticipantInput (NOT ConnectParticipantWithLexBot — that is a UI-only name).
+  The block type MUST be ConnectParticipantWithLexBot (NOT GetParticipantInput — that is a different action for plain input).
   Parameters: {
     "Text": "${journeyConfig.welcomeMessage}",
     "LexTimeoutSeconds": {
@@ -196,7 +196,7 @@ FALLBACK SEQUENCE (shared terminal for all unmatched/error paths):
 TERMINAL BLOCK RULES:
   TransferContactToQueue: NOT terminal. MUST have Parameters: {}. Transitions MUST include NextAction, and Errors for "QueueAtCapacity" and "NoMatchingError". Route all of these to <fallback_message>.
   DisconnectParticipant: terminal — MUST have Parameters: {} and Transitions: {}.
-  GetParticipantInput (Lex bot block): NOT terminal — it continues to the Compare block when the bot session ends.
+  ConnectParticipantWithLexBot: NOT terminal — it continues to the Compare block when the bot session ends. This is the ONLY valid type for Lex bot blocks (GetParticipantInput is a different action for plain text/DTMF input).
 
 ERRORS RULES:
   Every non-terminal block MUST have an Errors array in its Transitions.
