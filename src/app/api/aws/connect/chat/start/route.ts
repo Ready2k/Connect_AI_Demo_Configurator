@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getConnectClient, startChatContact } from "@/lib/aws/connectClient";
-import { ConnectParticipantClient, CreateParticipantConnectionCommand } from "@aws-sdk/client-connectparticipant";
+import { ConnectParticipantClient, CreateParticipantConnectionCommand, SendEventCommand } from "@aws-sdk/client-connectparticipant";
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,7 +28,13 @@ export async function POST(req: NextRequest) {
       ParticipantDetails: {
         DisplayName: participantName,
       },
-      SupportedMessagingContentTypes: ["text/plain", "text/markdown"],
+      SupportedMessagingContentTypes: [
+        "text/plain", 
+        "text/markdown", 
+        "application/json", 
+        "application/vnd.amazonaws.connect.message.interactive",
+        "application/vnd.amazonaws.connect.message.interactive.response"
+      ],
     });
 
     const participantToken = chatContact.ParticipantToken;
@@ -49,6 +55,13 @@ export async function POST(req: NextRequest) {
     if (!connectionToken) {
       throw new Error("Failed to retrieve ConnectionToken from CreateParticipantConnection");
     }
+
+    // 3. Send Connection Acknowledged Event to unblock Contact Flow
+    const ackCommand = new SendEventCommand({
+      ConnectionToken: connectionToken,
+      ContentType: "application/vnd.amazonaws.connect.event.connection.acknowledged",
+    });
+    await participantClient.send(ackCommand);
 
     return NextResponse.json({
       contactId: chatContact.ContactId,

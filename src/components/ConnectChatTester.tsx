@@ -103,14 +103,8 @@ export function ConnectChatTester({ discoveredFlows }: ConnectChatTesterProps) {
       if (data.transcript) {
         // Filter out event-type items that do not contain text content unless they are joining announcements
         const parsed: ChatMessage[] = data.transcript
-          .filter((item) => {
-            if (item.type === "MESSAGE") return true;
-            // Let's show system events if they indicate disconnect or wrap up
-            if (item.type === "EVENT" && item.content && item.content.includes("left")) return true;
-            return false;
-          })
           .map((item) => {
-            let parsedText = item.content || "";
+            let parsedText = item.content || `[No Content] Type: ${item.type}`;
             if (item.contentType && item.contentType !== "text/plain" && item.contentType !== "text/markdown") {
               parsedText = `[${item.contentType}] ${parsedText}`;
             }
@@ -123,7 +117,14 @@ export function ConnectChatTester({ discoveredFlows }: ConnectChatTesterProps) {
             };
           });
 
-        setMessages(parsed);
+        setMessages((prev) => {
+          const sysInit = prev.find(m => m.id === "sys-init");
+          const sysEnded = prev.find(m => m.id === "sys-ended");
+          const newMessages = [...parsed];
+          if (sysInit) newMessages.unshift(sysInit);
+          if (sysEnded) newMessages.push(sysEnded);
+          return newMessages;
+        });
       }
     } catch (err: unknown) {
       console.error("Transcript polling error:", err);

@@ -21,6 +21,8 @@ export async function POST(req: NextRequest) {
     const input: any = {
       ConnectionToken: connectionToken,
       MaxResults: 100,
+      ScanDirection: "BACKWARD",
+      SortOrder: "DESCENDING",
     };
     if (nextToken) {
       input.NextToken = nextToken;
@@ -31,7 +33,9 @@ export async function POST(req: NextRequest) {
     const res = await client.send(command);
 
     // Clean and filter the transcript items to return only necessary details
-    const formattedTranscript = (res.Transcript || []).map((item) => ({
+    const rawTranscript = res.Transcript || [];
+    console.log("Raw AWS Transcript:", JSON.stringify(rawTranscript, null, 2));
+    const formattedTranscript = [...rawTranscript].reverse().map((item) => ({
       id: item.Id,
       type: item.Type,
       participantRole: item.ParticipantRole, // CUSTOMER, AGENT, SYSTEM
