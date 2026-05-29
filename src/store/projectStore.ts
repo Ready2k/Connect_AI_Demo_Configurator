@@ -43,8 +43,8 @@ export const useProjectStore = create<ProjectState>()(
       storage: createJSONStorage(() => localStorage),
       version: 2,
       migrate: (persistedState: any, version: number) => {
-        if (version === 1) {
-          // Migrate agents from object to array
+        // v0 and v1 both need the agents object→array migration
+        if (version <= 1) {
           const oldConfig = persistedState.projectConfig;
           if (oldConfig && oldConfig.agents && !Array.isArray(oldConfig.agents)) {
             const arr = [];
@@ -55,6 +55,10 @@ export const useProjectStore = create<ProjectState>()(
               arr.push({ ...oldConfig.agents.lostCard, id: "lostCard" });
             }
             oldConfig.agents = arr;
+          }
+          // Ensure nameSuffixMode is always present after migration
+          if (oldConfig?.aws && !oldConfig.aws.nameSuffixMode) {
+            oldConfig.aws.nameSuffixMode = "environment_and_timestamp";
           }
         }
         return persistedState;

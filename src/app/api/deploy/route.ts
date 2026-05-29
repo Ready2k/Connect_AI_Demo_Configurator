@@ -3,10 +3,18 @@ import { deployProject } from "@/lib/aws/deployService";
 import { ProjectConfig } from "@/types/project";
 
 export async function POST(request: Request) {
-  const { config, timestamp } = await request.json();
+  let config: ProjectConfig | undefined;
+  let timestamp: number | undefined;
+  try {
+    const body = await request.json();
+    config = body.config;
+    timestamp = body.timestamp;
+  } catch {
+    return NextResponse.json({ error: "Request body is not valid JSON." }, { status: 400 });
+  }
 
   // Validation — return plain JSON errors before streaming begins
-  if (!config || !config.aws.region || !config.aws.assistantId) {
+  if (!config || !config.aws || !config.aws.region || !config.aws.assistantId) {
     return NextResponse.json({ error: "Missing config, region, or assistantId." }, { status: 400 });
   }
 
@@ -17,7 +25,7 @@ export async function POST(request: Request) {
     }, { status: 400 });
   }
 
-  const enabledAgents = (config as ProjectConfig).agents.filter((a: { enabled: boolean }) => a.enabled);
+  const enabledAgents = config.agents?.filter((a: { enabled: boolean }) => a.enabled) ?? [];
   if (enabledAgents.length === 0) {
     return NextResponse.json({ success: false, error: "No agents are selected for deployment. Enable at least one agent on the Agents page." }, { status: 400 });
   }
@@ -32,8 +40,8 @@ export async function POST(request: Request) {
 
       try {
         const result = await deployProject(
-          config as ProjectConfig,
-          timestamp || Date.now(),
+          config!,
+          timestamp ?? Date.now(),
           (event) => emit(event)
         );
         emit({ type: "done", success: result.success, error: result.error, manifest: result.manifest });

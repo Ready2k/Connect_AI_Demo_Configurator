@@ -65,7 +65,8 @@ export async function deployProject(
     const agents: DeployedAgent[] = [];
 
     let accountId = "";
-    if (aws.deploymentMode.includes("agents")) {
+    const needsConnectArn = aws.deploymentMode.includes("agents") && !!(aws.connectRegion && aws.connectInstanceId);
+    if (needsConnectArn) {
       const sts = new STSClient({ region: aws.region });
       const identity = await sts.send(new GetCallerIdentityCommand({}));
       accountId = identity.Account || "";
@@ -128,10 +129,15 @@ export async function deployProject(
           throw new Error(`Failed to create Prompt Version for '${baseName}': ${(err as Error).message}`);
         }
 
+        if (!promptVerRes.versionNumber) {
+          onProgress?.({ type: "step_error", stepId: `prompt_${i}` });
+          throw new Error(`Failed to create Prompt Version for '${baseName}': AWS did not return a version number.`);
+        }
+
         prompts.push({
           id: promptRes.aiPrompt.aiPromptId,
           arn: promptRes.aiPrompt.aiPromptArn as string,
-          version: promptVerRes.versionNumber?.toString(),
+          version: promptVerRes.versionNumber.toString(),
           versionArn: promptVerRes.aiPrompt?.aiPromptArn || `${promptRes.aiPrompt.aiPromptArn}:${promptVerRes.versionNumber}`,
           baseName,
           deployedName: promptRes.aiPrompt.name as string,
@@ -155,8 +161,14 @@ export async function deployProject(
 
         if (a.configuration?.orchestrationAIAgentConfiguration) {
           const targetPrompt = prompts.find(p => p.baseName === baseName);
+          if (!targetPrompt && aws.deploymentMode !== "create_agents_only") {
+            throw new Error(`No deployed prompt found for agent '${baseName}'. Expected a prompt to have been created in this deployment run.`);
+          }
+          if (!targetPrompt && aws.deploymentMode === "create_agents_only") {
+            throw new Error(`Deployment mode is 'create_agents_only' but no prompt ID was provided for agent '${baseName}'. Set the orchestrationAIPromptId manually or switch to 'create_prompts_and_agents'.`);
+          }
           a.configuration.orchestrationAIAgentConfiguration.orchestrationAIPromptId =
-            targetPrompt?.version ? `${targetPrompt.id}:${targetPrompt.version}` : (targetPrompt?.id || "");
+            targetPrompt!.version ? `${targetPrompt!.id}:${targetPrompt!.version}` : targetPrompt!.id;
           if (aws.connectRegion && aws.connectInstanceId) {
             a.configuration.orchestrationAIAgentConfiguration.connectInstanceArn =
               `arn:aws:connect:${aws.connectRegion}:${accountId}:instance/${aws.connectInstanceId}`;
@@ -170,23 +182,36 @@ export async function deployProject(
             throw new Error(`Expected agent identifier in SDK response.`);
           }
 
+          const createdAgentId = agentRes.aiAgent.aiAgentId;
+          const createdAgentArn = agentRes.aiAgent.aiAgentArn as string;
+          const createdAgentName = agentRes.aiAgent.name as string;
+
           let agentVerRes;
           try {
             agentVerRes = await createAiAgentVersion(client, {
               assistantId: aws.assistantId,
-              aiAgentId: agentRes.aiAgent.aiAgentId,
+              aiAgentId: createdAgentId,
             });
           } catch (e) { const err = e as any;
-            throw new Error(`Failed to create Agent Version: ${(err as Error).message}`);
+            // Agent was created but versioning failed — record the real ID so the user can find it
+            agents.push({
+              id: createdAgentId,
+              arn: createdAgentArn,
+              baseName,
+              deployedName: createdAgentName,
+              error: `Agent was created (id: ${createdAgentId}) but versioning failed: ${(err as Error).message}. Create the version manually in the AWS Console.`,
+            });
+            onProgress?.({ type: "step_error", stepId: `agent_${i}`, error: (err as Error).message });
+            continue;
           }
 
           agents.push({
-            id: agentRes.aiAgent.aiAgentId,
-            arn: agentRes.aiAgent.aiAgentArn as string,
+            id: createdAgentId,
+            arn: createdAgentArn,
             version: agentVerRes.versionNumber?.toString(),
-            versionArn: agentVerRes.aiAgent?.aiAgentArn || `${agentRes.aiAgent.aiAgentArn}:${agentVerRes.versionNumber}`,
+            versionArn: agentVerRes.aiAgent?.aiAgentArn || `${createdAgentArn}:${agentVerRes.versionNumber}`,
             baseName,
-            deployedName: agentRes.aiAgent.name as string,
+            deployedName: createdAgentName,
           });
 
           onProgress?.({ type: "step_complete", stepId: `agent_${i}` });
@@ -200,7 +225,7 @@ export async function deployProject(
             arn: "deployment_failed",
             baseName,
             deployedName: baseName,
-            error: `Agent creation blocked by AWS IAM: ${(err as Error).message}. Please create this Agent manually in the AWS Console.`,
+            error: `Agent creation failed: ${(err as Error).message}. Please create this Agent manually in the AWS Console.`,
           });
         }
       }

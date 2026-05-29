@@ -208,24 +208,25 @@ export async function verifyFlow(args: {
     responseText = await converseWithModel(client, modelId, messages, systemPrompt);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Bedrock call failed";
-    return { explanation: msg, issues: [], suggestions: [], verifiedAt: new Date().toISOString() };
+    return { explanation: "", issues: [], suggestions: [], verifiedAt: new Date().toISOString(), error: msg };
   }
 
+  const cleaned = stripMarkdownFences(responseText);
   try {
-    const parsed = JSON.parse(responseText) as { explanation?: string; issues?: string[]; suggestions?: string[] };
+    const parsed = JSON.parse(cleaned) as { explanation?: string; issues?: string[]; suggestions?: string[] };
     return {
-      explanation: parsed.explanation ?? responseText,
+      explanation: parsed.explanation ?? cleaned,
       issues: Array.isArray(parsed.issues) ? parsed.issues : [],
       suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
       verifiedAt: new Date().toISOString(),
     };
   } catch {
-    const explanationMatch = responseText.match(/explanation["\s:]+([^"]+)/i);
     return {
-      explanation: explanationMatch ? explanationMatch[1] : responseText,
+      explanation: cleaned,
       issues: [],
       suggestions: [],
       verifiedAt: new Date().toISOString(),
+      error: "Model did not return valid JSON — treat this verification result as unreliable.",
     };
   }
 }

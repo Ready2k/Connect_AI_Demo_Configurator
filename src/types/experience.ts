@@ -27,6 +27,7 @@ export interface VerificationResult {
   issues: string[];
   suggestions: string[];
   verifiedAt: string;
+  error?: string;
 }
 
 export interface ExperienceConfig {

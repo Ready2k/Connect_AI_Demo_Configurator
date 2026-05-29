@@ -289,8 +289,18 @@ export async function POST(req: NextRequest) {
     let content: string;
     try {
       content = normalizeFlowContent(flowJson);
-    } catch {
-      return NextResponse.json({ error: "flowJson is not valid JSON" }, { status: 400 });
+    } catch (normalizeErr: unknown) {
+      const msg = normalizeErr instanceof Error ? normalizeErr.message : "Unknown normalisation error";
+      const isJsonError = msg.toLowerCase().includes("json") || msg.toLowerCase().includes("unexpected token") || msg.toLowerCase().includes("parse");
+      let parsedForDebug: unknown = null;
+      try { parsedForDebug = JSON.parse(flowJson); } catch { /* not parseable */ }
+      return NextResponse.json(
+        {
+          error: isJsonError ? "flowJson is not valid JSON" : `Flow structure error: ${msg}`,
+          ...(parsedForDebug ? { sentContent: parsedForDebug } : {}),
+        },
+        { status: 400 }
+      );
     }
 
     const client = getConnectClient(region);
